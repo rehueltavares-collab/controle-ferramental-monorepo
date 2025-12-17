@@ -172,3 +172,5 @@ def create_checklist(payload: schemas.ChecklistSemanalCreate, db: Session = Depe
 @app.get("/checklists-semanais/", response_model=List[schemas.ChecklistSemanal])
 def list_checklists(db: Session = Depends(get_db)):
     return db.query(models.ChecklistSemanal).all()
+"http://localhost:5174",
+"http://127.0.0.1:5174",
