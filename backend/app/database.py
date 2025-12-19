@@ -1,17 +1,17 @@
+from pathlib import Path
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker, declarative_base
 
-# Caminho do banco SQLite (arquivo na raiz do projeto)
-DATABASE_URL = "sqlite:///./ferramental.db"
+# pega a raiz do projeto: .../controle-ferramental-limpo
+BASE_DIR = Path(__file__).resolve().parents[2]
+DB_PATH = BASE_DIR / "ferramental.db"
 
-# Cria o engine de conexão com o banco
+DATABASE_URL = f"sqlite:///{DB_PATH.as_posix()}"
+
 engine = create_engine(
     DATABASE_URL,
-    connect_args={"check_same_thread": False}
+    connect_args={"check_same_thread": False},
 )
 
-# Cria a sessão de acesso ao banco
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
-
-# Base para todos os models (tabelas)
 Base = declarative_base()
