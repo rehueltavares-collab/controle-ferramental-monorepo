@@ -1,19 +1,24 @@
 # Python
+.venv/
 __pycache__/
 *.pyc
 *.pyo
-.venv/
-venv/
 
-# SQLite local
+# Node
+node_modules/
+dist/
+.vite/
+
+# Database
+ferramental.db
 *.db
+*.sqlite
+*.sqlite3
 
 # Env
 .env
+.env.*
 
-# Node / Vite
-node_modules/
-dist/
-
-# VS Code
-.vscode/
+# OS
+.DS_Store
+Thumbs.db

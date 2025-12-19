@@ -3,7 +3,7 @@ from datetime import datetime
 from sqlalchemy import Column, Integer, String, ForeignKey, DateTime, Float, Text
 from sqlalchemy.orm import relationship
 
-from app.database import Base
+from .database import Base
 
 
 class Setor(Base):

@@ -3,45 +3,12 @@ from typing import List, Optional
 from fastapi import FastAPI, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session
-from sqlalchemy import text
 
-from app.database import SessionLocal, Base, engine
-from app import models, schemas
+from .database import SessionLocal, Base, engine
+from . import models, schemas
+from .routers import subresponsaveis, movimentos
 
-# =========================
-# Bootstrap do banco
-# =========================
-# Cria tabelas que não existirem
-Base.metadata.create_all(bind=engine)
-
-
-def ensure_sqlite_schema():
-    """
-    SQLite não faz migration automática.
-    Esse "patch" garante que a coluna kit_id exista na tabela checklists_semanais.
-    """
-    with engine.connect() as conn:
-        # Confere se a tabela existe
-        tables = [r[0] for r in conn.execute(text("SELECT name FROM sqlite_master WHERE type='table'")).fetchall()]
-        if "checklists_semanais" not in tables:
-            return
-
-        # Lista colunas existentes
-        cols = [r[1] for r in conn.execute(text("PRAGMA table_info(checklists_semanais)")).fetchall()]
-
-        # Se faltar kit_id, adiciona
-        if "kit_id" not in cols:
-            conn.execute(text("ALTER TABLE checklists_semanais ADD COLUMN kit_id INTEGER"))
-            conn.commit()
-
-
-# roda no startup do app
-ensure_sqlite_schema()
-
-# =========================
-# App
-# =========================
-app = FastAPI(title="Controle de Ferramental – Kits")
+app = FastAPI(title="Controle de Ferramental – Monorepo (Backend FastAPI)")
 
 # ---------- CORS (PWA) ----------
 app.add_middleware(
@@ -49,6 +16,8 @@ app.add_middleware(
     allow_origins=[
         "http://localhost:5173",
         "http://127.0.0.1:5173",
+        "http://localhost:5174",
+        "http://127.0.0.1:5174",
         "http://localhost:3000",
         "http://127.0.0.1:3000",
     ],
@@ -56,6 +25,14 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# ---------- ROUTERS (NOVOS) ----------
+app.include_router(subresponsaveis.router)
+app.include_router(movimentos.router)
+
+# ---------- TABELAS ----------
+# Garante tabelas (cria novas, não altera colunas antigas)
+Base.metadata.create_all(bind=engine)
 
 # ---------- DEPENDÊNCIA DB ----------
 def get_db():
@@ -69,10 +46,6 @@ def get_db():
 @app.get("/")
 def read_root():
     return {"status": "ok", "mensagem": "API Controle de Ferramental rodando"}
-
-@app.get("/health/")
-def health():
-    return {"status": "healthy"}
 
 # ---------- ITENS ----------
 @app.post("/itens/", response_model=schemas.Item)
@@ -154,6 +127,35 @@ def adicionar_item_kit(payload: schemas.KitItemCreate, db: Session = Depends(get
 def listar_itens_kit(kit_id: int, db: Session = Depends(get_db)):
     return db.query(models.KitItem).filter(models.KitItem.kit_id == kit_id).all()
 
+# >>> ESTE É O QUE O PWA PRECISA: PATRIMÔNIO + DESCRIÇÃO
+@app.get("/kits/{kit_id}/itens-detalhados/")
+def listar_itens_kit_detalhados(kit_id: int, db: Session = Depends(get_db)):
+    q = (
+        db.query(
+            models.KitItem.id.label("kit_item_id"),
+            models.KitItem.kit_id,
+            models.KitItem.item_id,
+            models.KitItem.quantidade,
+            models.Item.patrimonio,
+            models.Item.descricao,
+        )
+        .join(models.Item, models.Item.id == models.KitItem.item_id)
+        .filter(models.KitItem.kit_id == kit_id)
+        .order_by(models.Item.patrimonio.asc())
+    )
+
+    return [
+        {
+            "kit_item_id": r.kit_item_id,
+            "kit_id": r.kit_id,
+            "item_id": r.item_id,
+            "quantidade": r.quantidade,
+            "patrimonio": r.patrimonio,
+            "descricao": r.descricao,
+        }
+        for r in q.all()
+    ]
+
 # ---------- CHECKLIST SEMANAL ----------
 @app.post("/checklists-semanais/", response_model=schemas.ChecklistSemanal)
 def create_checklist(payload: schemas.ChecklistSemanalCreate, db: Session = Depends(get_db)):
@@ -172,5 +174,3 @@ def create_checklist(payload: schemas.ChecklistSemanalCreate, db: Session = Depe
 @app.get("/checklists-semanais/", response_model=List[schemas.ChecklistSemanal])
 def list_checklists(db: Session = Depends(get_db)):
     return db.query(models.ChecklistSemanal).all()
-"http://localhost:5174",
-"http://127.0.0.1:5174",
