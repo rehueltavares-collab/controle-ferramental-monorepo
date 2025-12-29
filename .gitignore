@@ -1,24 +1,35 @@
-# Python
+﻿# Python
 .venv/
 __pycache__/
 *.pyc
 *.pyo
 
 # Node
-node_modules/
-dist/
-.vite/
+pwa/node_modules/
+pwa/dist/
+pwa/node_modules/.vite/
+pwa/.vite/
 
-# Database
-ferramental.db
+# Local DB / dumps
 *.db
 *.sqlite
 *.sqlite3
+checklists_last3.json
+checklists_last3.txt
+
+# Certificados locais (mkcert)
+pwa/*.pem
 
 # Env
 .env
 .env.*
+pwa/.env
+pwa/.env.*
 
-# OS
-.DS_Store
-Thumbs.db
+
+# Env
+.env
+.env.*
+pwa/.env
+pwa/.env.*
+
