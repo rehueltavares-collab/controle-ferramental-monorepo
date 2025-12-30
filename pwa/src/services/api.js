@@ -1,8 +1,8 @@
-const BASE = import.meta.env.VITE_API_URL;
+﻿const BASE = import.meta.env.VITE_API_URL;
 
 function norm(path) {
   if (!path.startsWith("/")) path = `/${path}`;
-  // mantém sua regra: adiciona "/" no final quando não tem "?" e não é "/"
+  // mantÃ©m sua regra: adiciona "/" no final quando nÃ£o tem "?" e nÃ£o Ã© "/"
   if (path !== "/" && !path.includes("?") && !path.endsWith("/")) path += "/";
   return path;
 }
@@ -29,10 +29,10 @@ export async function apiPost(path, body) {
 }
 
 // ===============================
-// SUBRESPONSÁVEIS
+// SUBRESPONSÃVEIS
 // ===============================
 export async function searchSubresponsaveis(query = "") {
-  // aqui NÃO pode adicionar "/" no final depois do "?" (sua norm já evita isso)
+  // aqui NÃƒO pode adicionar "/" no final depois do "?" (sua norm jÃ¡ evita isso)
   return apiGet(`/subresponsaveis?query=${encodeURIComponent(query)}`);
 }
 
@@ -50,3 +50,6 @@ export async function distribuir(payload) {
 export async function recolher(payload) {
   return apiPost(`/movimentos/recolher`, payload);
 }
+
+
+

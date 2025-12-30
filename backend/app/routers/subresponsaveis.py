@@ -4,10 +4,10 @@ from typing import Optional, List
 import sqlite3
 
 from ..utils.security import hash_pin
-
-DB_PATH = "ferramental.db"
+from ..database import DB_PATH  # <<< usa o DB "oficial" do projeto
 
 router = APIRouter(prefix="/subresponsaveis", tags=["subresponsaveis"])
+
 
 class SubresponsavelOut(BaseModel):
     id: int
@@ -15,22 +15,30 @@ class SubresponsavelOut(BaseModel):
     secao: Optional[str] = None
     ativo: int
 
+
 class DefinirPinIn(BaseModel):
     pin: str
 
+
+def _connect():
+    # DB_PATH no database.py é Path; sqlite3 aceita str
+    return sqlite3.connect(str(DB_PATH))
+
+
 @router.get("", response_model=List[SubresponsavelOut])
 def listar(query: str = Query(default="", description="busca por nome")):
-    con = sqlite3.connect(DB_PATH)
+    con = _connect()
     con.row_factory = sqlite3.Row
     cur = con.cursor()
 
     q = query.strip().upper()
+
     if q:
         cur.execute(
             """
             SELECT id, nome, secao, ativo
             FROM subresponsaveis
-            WHERE ativo=1 AND nome LIKE ?
+            WHERE ativo=1 AND UPPER(nome) LIKE ?
             ORDER BY nome
             LIMIT 50
             """,
@@ -51,13 +59,14 @@ def listar(query: str = Query(default="", description="busca por nome")):
     con.close()
     return rows
 
+
 @router.post("/{sub_id}/definir-pin")
 def definir_pin(sub_id: int, body: DefinirPinIn):
     pin = body.pin.strip()
     if not pin.isdigit() or len(pin) != 6:
         raise HTTPException(status_code=400, detail="PIN deve ter 6 dígitos numéricos")
 
-    con = sqlite3.connect(DB_PATH)
+    con = _connect()
     cur = con.cursor()
 
     cur.execute("SELECT id FROM subresponsaveis WHERE id=?", (sub_id,))

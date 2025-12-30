@@ -1,51 +1,80 @@
+from fastapi import APIRouter, HTTPException, Query
+from pydantic import BaseModel
+from typing import Optional, List
 import sqlite3
-import pandas as pd
-from pathlib import Path
 
-DB_PATH = "ferramental.db"
+from ..utils.security import hash_pin
+from ..database import DB_PATH as SA_DB_PATH  # caminho oficial do DB (mesmo do SQLAlchemy)
 
-def main():
-    # AJUSTE ESTE CAMINHO PARA O SEU ARQUIVO
-    xlsx = Path(r"C:\Users\rehuel.tavares\Projetos\controle-ferramental\Projetos\controle-ferramental\ATIVOS 09-12 - MONITORAMENTO.xls")
+DB_PATH = str(SA_DB_PATH)
 
-    df = pd.read_excel(xlsx)
-    df.columns = [c.strip() for c in df.columns]
+router = APIRouter(prefix="/subresponsaveis", tags=["subresponsaveis"])
 
-    # tenta nomes de colunas mais prováveis
-    nome_col = "Nome" if "Nome" in df.columns else None
-    secao_col = "Descrição Seção" if "Descrição Seção" in df.columns else ("Descricao Secao" if "Descricao Secao" in df.columns else None)
 
-    if not nome_col:
-        raise RuntimeError(f"Coluna 'Nome' não encontrada. Colunas: {list(df.columns)}")
+class SubresponsavelOut(BaseModel):
+    id: int
+    nome: str
+    secao: Optional[str] = None
+    ativo: int
 
-    df[nome_col] = df[nome_col].astype(str).str.strip().str.upper()
-    if secao_col:
-        df[secao_col] = df[secao_col].astype(str).str.strip()
+
+class DefinirPinIn(BaseModel):
+    pin: str
+
+
+@router.get("", response_model=List[SubresponsavelOut])
+def listar(query: str = Query(default="", description="busca por nome")):
+    con = sqlite3.connect(DB_PATH)
+    con.row_factory = sqlite3.Row
+    cur = con.cursor()
+
+    q = query.strip().upper()
+    if q:
+        cur.execute(
+            """
+            SELECT id, nome, secao, ativo
+            FROM subresponsaveis
+            WHERE ativo=1 AND nome LIKE ?
+            ORDER BY nome
+            LIMIT 50
+            """,
+            (f"%{q}%",),
+        )
     else:
-        df["Descrição Seção"] = ""
-        secao_col = "Descrição Seção"
+        cur.execute(
+            """
+            SELECT id, nome, secao, ativo
+            FROM subresponsaveis
+            WHERE ativo=1
+            ORDER BY nome
+            LIMIT 50
+            """
+        )
 
-    df = df[(df[nome_col]!="") & (df[nome_col].str.lower()!="nan")]
+    rows = [dict(r) for r in cur.fetchall()]
+    con.close()
+    return rows
+
+
+@router.post("/{sub_id}/definir-pin")
+def definir_pin(sub_id: int, body: DefinirPinIn):
+    pin = body.pin.strip()
+    if not pin.isdigit() or len(pin) != 6:
+        raise HTTPException(status_code=400, detail="PIN deve ter 6 dígitos numéricos")
 
     con = sqlite3.connect(DB_PATH)
     cur = con.cursor()
 
-    # evita duplicar se rodar 2x: usa nome+secao como chave “prática”
-    for _, r in df.iterrows():
-        cur.execute(
-            "SELECT 1 FROM subresponsaveis WHERE nome=? AND IFNULL(secao,'')=IFNULL(?, '')",
-            (r[nome_col], r[secao_col]),
-        )
-        if cur.fetchone():
-            continue
-        cur.execute(
-            "INSERT INTO subresponsaveis (nome, secao, ativo) VALUES (?, ?, 1)",
-            (r[nome_col], r[secao_col]),
-        )
+    cur.execute("SELECT id FROM subresponsaveis WHERE id=?", (sub_id,))
+    if not cur.fetchone():
+        con.close()
+        raise HTTPException(status_code=404, detail="Subresponsável não encontrado")
 
+    cur.execute(
+        "UPDATE subresponsaveis SET pin_hash=? WHERE id=?",
+        (hash_pin(pin), sub_id),
+    )
     con.commit()
     con.close()
-    print("OK: import concluído. Linhas lidas:", len(df))
 
-if __name__ == "__main__":
-    main()
+    return {"ok": True}

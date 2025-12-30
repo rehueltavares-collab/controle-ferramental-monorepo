@@ -1,42 +1,37 @@
-from typing import List, Optional
+﻿from typing import List, Optional
 
-from fastapi import FastAPI, Depends
+from fastapi import FastAPI, Depends, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session
 
-from backend.app.database import SessionLocal, Base, engine
-from backend.app import models, schemas
-from backend.app.routers import subresponsaveis, movimentos
+from .database import SessionLocal, Base, engine
+from . import models, schemas
+from .routers import subresponsaveis, movimentos
 
-# ======================================================
-# APP
-# ======================================================
-app = FastAPI(
-    title="Controle de Ferramental – Backend",
-    version="1.0.0",
-)
 
-# ======================================================
-# CORS – LIBERADO PARA REDE (DEV INTERNO)
-# ======================================================
+app = FastAPI(title="Controle de Ferramental – Backend", version="1.0.0")
+
+# -------- CORS (DEV / REDE INTERNA) --------
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[
         "http://localhost:5173",
         "http://127.0.0.1:5173",
-        "http://192.168.0.130:5173",  # seu IP atual
-        # se mudar de rede, ajuste aqui
+        "http://localhost:5174",
+        "http://127.0.0.1:5174",
+        "http://localhost:3000",
+        "http://127.0.0.1:3000",
+        "http://192.168.0.130:5173",
     ],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-# ======================================================
-# DATABASE
-# ======================================================
+# -------- Tabelas --------
 Base.metadata.create_all(bind=engine)
 
+# -------- DB Dependency --------
 def get_db():
     db = SessionLocal()
     try:
@@ -44,45 +39,31 @@ def get_db():
     finally:
         db.close()
 
-# ======================================================
-# ROUTERS (NOVOS)
-# ======================================================
+# -------- Routers --------
 app.include_router(subresponsaveis.router, tags=["Subresponsáveis"])
 app.include_router(movimentos.router, tags=["Movimentos"])
 
-# ======================================================
-# HEALTHCHECK
-# ======================================================
+# -------- Health --------
 @app.get("/")
 def healthcheck():
-    return {
-        "status": "ok",
-        "mensagem": "API Controle de Ferramental rodando",
-    }
+    return {"status": "ok", "mensagem": "API Controle de Ferramental rodando"}
 
-# ======================================================
-# ITENS
-# ======================================================
+# -------- ITENS --------
 @app.post("/itens/", response_model=schemas.Item)
-def criar_item(payload: schemas.ItemCreate, db: Session = Depends(get_db)):
-    item = models.Item(
-        patrimonio=payload.patrimonio,
-        descricao=payload.descricao,
-    )
+def create_item(payload: schemas.ItemCreate, db: Session = Depends(get_db)):
+    item = models.Item(patrimonio=payload.patrimonio, descricao=payload.descricao)
     db.add(item)
     db.commit()
     db.refresh(item)
     return item
 
 @app.get("/itens/", response_model=List[schemas.Item])
-def listar_itens(db: Session = Depends(get_db)):
+def list_itens(db: Session = Depends(get_db)):
     return db.query(models.Item).all()
 
-# ======================================================
-# SETORES
-# ======================================================
+# -------- SETORES --------
 @app.post("/setores/", response_model=schemas.Setor)
-def criar_setor(payload: schemas.SetorCreate, db: Session = Depends(get_db)):
+def create_setor(payload: schemas.SetorCreate, db: Session = Depends(get_db)):
     setor = models.Setor(nome=payload.nome)
     db.add(setor)
     db.commit()
@@ -90,18 +71,16 @@ def criar_setor(payload: schemas.SetorCreate, db: Session = Depends(get_db)):
     return setor
 
 @app.get("/setores/", response_model=List[schemas.Setor])
-def listar_setores(db: Session = Depends(get_db)):
+def list_setores(db: Session = Depends(get_db)):
     return db.query(models.Setor).all()
 
-# ======================================================
-# ENCARREGADOS
-# ======================================================
+# -------- ENCARREGADOS --------
 @app.post("/encarregados/", response_model=schemas.Encarregado)
-def criar_encarregado(payload: schemas.EncarregadoCreate, db: Session = Depends(get_db)):
+def create_encarregado(payload: schemas.EncarregadoCreate, db: Session = Depends(get_db)):
     enc = models.Encarregado(
         setor_id=payload.setor_id,
-        nome=payload.nome,
         funcao=payload.funcao,
+        nome=payload.nome,
         telefone=payload.telefone,
     )
     db.add(enc)
@@ -110,45 +89,31 @@ def criar_encarregado(payload: schemas.EncarregadoCreate, db: Session = Depends(
     return enc
 
 @app.get("/encarregados/", response_model=List[schemas.Encarregado])
-def listar_encarregados(
-    setor_id: Optional[int] = None,
-    db: Session = Depends(get_db),
-):
+def list_encarregados(setor_id: Optional[int] = None, db: Session = Depends(get_db)):
     q = db.query(models.Encarregado)
     if setor_id is not None:
         q = q.filter(models.Encarregado.setor_id == setor_id)
     return q.all()
 
-# ======================================================
-# KITS
-# ======================================================
+# -------- KITS --------
 @app.post("/kits/", response_model=schemas.Kit)
-def criar_kit(payload: schemas.KitCreate, db: Session = Depends(get_db)):
-    kit = models.Kit(
-        nome=payload.nome,
-        setor_id=payload.setor_id,
-        tipo=payload.tipo,
-    )
+def create_kit(payload: schemas.KitCreate, db: Session = Depends(get_db)):
+    kit = models.Kit(nome=payload.nome, setor_id=payload.setor_id, tipo=payload.tipo)
     db.add(kit)
     db.commit()
     db.refresh(kit)
     return kit
 
 @app.get("/kits/", response_model=List[schemas.Kit])
-def listar_kits(
-    setor_id: Optional[int] = None,
-    db: Session = Depends(get_db),
-):
+def list_kits(setor_id: Optional[int] = None, db: Session = Depends(get_db)):
     q = db.query(models.Kit)
     if setor_id is not None:
         q = q.filter(models.Kit.setor_id == setor_id)
     return q.all()
 
-# ======================================================
-# KIT x ITENS
-# ======================================================
+# -------- KIT x ITENS --------
 @app.post("/kits/itens/", response_model=schemas.KitItem)
-def adicionar_item_kit(payload: schemas.KitItemCreate, db: Session = Depends(get_db)):
+def add_item_to_kit(payload: schemas.KitItemCreate, db: Session = Depends(get_db)):
     ki = models.KitItem(
         kit_id=payload.kit_id,
         item_id=payload.item_id,
@@ -160,18 +125,12 @@ def adicionar_item_kit(payload: schemas.KitItemCreate, db: Session = Depends(get
     return ki
 
 @app.get("/kits/{kit_id}/itens/", response_model=List[schemas.KitItem])
-def listar_itens_kit(kit_id: int, db: Session = Depends(get_db)):
-    return (
-        db.query(models.KitItem)
-        .filter(models.KitItem.kit_id == kit_id)
-        .all()
-    )
+def list_kit_itens(kit_id: int, db: Session = Depends(get_db)):
+    return db.query(models.KitItem).filter(models.KitItem.kit_id == kit_id).all()
 
-# ======================================================
-# ITENS DETALHADOS (PWA)
-# ======================================================
+# -------- ITENS DETALHADOS (PWA) --------
 @app.get("/kits/{kit_id}/itens-detalhados/")
-def listar_itens_kit_detalhados(kit_id: int, db: Session = Depends(get_db)):
+def list_itens_kit_detalhados(kit_id: int, db: Session = Depends(get_db)):
     q = (
         db.query(
             models.KitItem.id.label("kit_item_id"),
@@ -198,11 +157,12 @@ def listar_itens_kit_detalhados(kit_id: int, db: Session = Depends(get_db)):
         for r in q.all()
     ]
 
-# ======================================================
-# CHECKLIST SEMANAL
-# ======================================================
+# -------- CHECKLIST SEMANAL --------
 @app.post("/checklists-semanais/", response_model=schemas.ChecklistSemanal)
-def criar_checklist(payload: schemas.ChecklistSemanalCreate, db: Session = Depends(get_db)):
+def create_checklist(payload: schemas.ChecklistSemanalCreate, db: Session = Depends(get_db)):
+    if (payload.latitude in (0, 0.0)) and (payload.longitude in (0, 0.0)):
+        raise HTTPException(status_code=400, detail="GPS indisponível (0,0). Checklist não pode ser enviado.")
+
     chk = models.ChecklistSemanal(
         kit_id=payload.kit_id,
         encarregado_id=payload.encarregado_id,
@@ -216,5 +176,5 @@ def criar_checklist(payload: schemas.ChecklistSemanalCreate, db: Session = Depen
     return chk
 
 @app.get("/checklists-semanais/", response_model=List[schemas.ChecklistSemanal])
-def listar_checklists(db: Session = Depends(get_db)):
+def list_checklists(db: Session = Depends(get_db)):
     return db.query(models.ChecklistSemanal).all()
