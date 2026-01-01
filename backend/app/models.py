@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from sqlalchemy import Column, Integer, String, ForeignKey, DateTime, Float, Text
+from sqlalchemy import Column, Integer, String, ForeignKey, DateTime, Float, Text, Boolean
 from sqlalchemy.orm import relationship
 
 from .database import Base
@@ -24,6 +24,7 @@ class Item(Base):
     descricao = Column(String, nullable=False)
 
     kit_itens = relationship("KitItem", back_populates="item", cascade="all, delete-orphan")
+    movimentos = relationship("ItemMovimento", back_populates="item", cascade="all, delete-orphan")
 
 
 class Kit(Base):
@@ -38,6 +39,7 @@ class Kit(Base):
 
     itens = relationship("KitItem", back_populates="kit", cascade="all, delete-orphan")
     checklists = relationship("ChecklistSemanal", back_populates="kit", cascade="all, delete-orphan")
+    movimentos = relationship("ItemMovimento", back_populates="kit", cascade="all, delete-orphan")
 
 
 class KitItem(Base):
@@ -65,6 +67,7 @@ class Encarregado(Base):
 
     setor = relationship("Setor", back_populates="encarregados")
     checklists = relationship("ChecklistSemanal", back_populates="encarregado", cascade="all, delete-orphan")
+    movimentos = relationship("ItemMovimento", back_populates="encarregado", cascade="all, delete-orphan")
 
 
 class ChecklistSemanal(Base):
@@ -83,3 +86,55 @@ class ChecklistSemanal(Base):
 
     kit = relationship("Kit", back_populates="checklists")
     encarregado = relationship("Encarregado", back_populates="checklists")
+
+
+# ==========================
+# SUBRESPONSÁVEIS
+# ==========================
+class Subresponsavel(Base):
+    __tablename__ = "subresponsaveis"
+
+    id = Column(Integer, primary_key=True, index=True)
+    nome = Column(String, nullable=False, index=True)
+    secao = Column(String, nullable=True)
+    ativo = Column(Boolean, default=True, nullable=False)
+
+    # MVP: PIN simples (depois a gente faz hash)
+    pin = Column(String, nullable=True)
+
+    movimentos = relationship("ItemMovimento", back_populates="subresponsavel", cascade="all, delete-orphan")
+
+
+# ==========================
+# MOVIMENTOS (distribuir/recolher)
+# ==========================
+class ItemMovimento(Base):
+    __tablename__ = "item_movimentos"
+
+    id = Column(Integer, primary_key=True, index=True)
+
+    data_hora = Column(DateTime, default=datetime.utcnow, nullable=False)
+
+    # contexto
+    kit_id = Column(Integer, ForeignKey("kits.id"), nullable=False)
+    encarregado_id = Column(Integer, ForeignKey("encarregados.id"), nullable=False)
+    item_id = Column(Integer, ForeignKey("itens.id"), nullable=False)
+
+    # ação: DISTRIBUIR / RECOLHER
+    acao = Column(String, nullable=False)
+
+    # destino/origem
+    subresponsavel_id = Column(Integer, ForeignKey("subresponsaveis.id"), nullable=True)
+
+    # auditoria GPS
+    latitude = Column(Float, nullable=True)
+    longitude = Column(Float, nullable=True)
+    accuracy_m = Column(Float, nullable=True)
+    gps_timestamp = Column(String, nullable=True)
+
+    observacao = Column(String, nullable=True)
+
+    kit = relationship("Kit", back_populates="movimentos")
+    encarregado = relationship("Encarregado", back_populates="movimentos")
+    item = relationship("Item", back_populates="movimentos")
+    subresponsavel = relationship("Subresponsavel", back_populates="movimentos")

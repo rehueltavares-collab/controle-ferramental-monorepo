@@ -8,10 +8,11 @@ from .database import SessionLocal, Base, engine
 from . import models, schemas
 from .routers import subresponsaveis, movimentos
 
-
 app = FastAPI(title="Controle de Ferramental – Backend", version="1.0.0")
 
 # -------- CORS (DEV / REDE INTERNA) --------
+# Libera localhost e qualquer IP 192.168.x.x (com qualquer porta) para DEV.
+# Isso resolve: PWA em http://localhost:5173 chamando backend em http://192.168.1.108:8000
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[
@@ -21,8 +22,11 @@ app.add_middleware(
         "http://127.0.0.1:5174",
         "http://localhost:3000",
         "http://127.0.0.1:3000",
-        "http://192.168.0.130:5173",
+        # se abrir o PWA via IP também
+        "http://192.168.1.108:5173",
     ],
+    # libera QUALQUER host local/lan em dev (resolve celular/PC sem ficar caçando IP)
+    allow_origin_regex=r"^http://(localhost|127\.0\.0\.1|192\.168\.\d{1,3}\.\d{1,3})(:\d+)?$",
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -160,6 +164,7 @@ def list_itens_kit_detalhados(kit_id: int, db: Session = Depends(get_db)):
 # -------- CHECKLIST SEMANAL --------
 @app.post("/checklists-semanais/", response_model=schemas.ChecklistSemanal)
 def create_checklist(payload: schemas.ChecklistSemanalCreate, db: Session = Depends(get_db)):
+    # GPS obrigatório
     if (payload.latitude in (0, 0.0)) and (payload.longitude in (0, 0.0)):
         raise HTTPException(status_code=400, detail="GPS indisponível (0,0). Checklist não pode ser enviado.")
 

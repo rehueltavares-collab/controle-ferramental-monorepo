@@ -1,5 +1,5 @@
-from app.database import SessionLocal
-from app import models
+from backend.app.database import SessionLocal
+from backend.app import models
 
 DADOS = [
     ("Civil","Supervisor","Gilmar","21 96418-4262"),

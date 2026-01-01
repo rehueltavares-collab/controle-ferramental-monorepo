@@ -1,12 +1,6 @@
 ﻿// pwa/src/App.jsx
-import { useEffect, useMemo, useRef, useState } from "react";
-import {
-  apiGet,
-  apiPost,
-  searchSubresponsaveis,
-  distribuir as apiDistribuir,
-  recolher as apiRecolher,
-} from "./services/api";
+import React, { useEffect, useMemo, useRef, useState } from "react";
+import { apiGet, apiPost, searchSubresponsaveis, distribuir as apiDistribuir } from "./services/api";
 
 /**
  * =========================================================
@@ -60,18 +54,108 @@ function isGpsValid(geo) {
 
 /**
  * =========================================================
- * Subresponsável Autocomplete (com confirmação via PIN)
- * =========================================================
- *
- * Fluxo:
- * 1) Usuário digita -> busca no backend (debounce)
- * 2) Usuário clica em uma opção -> preenche campo e guarda subresponsavel_id
- * 3) Usuário clica "Confirmar" -> pede PIN (prompt), chama /movimentos/distribuir
- *
- * Observação: confirmamos distribuição no backend (movimentos).
+ * SafeSelect (dropdown próprio) — evita bug do <select> no Android
  * =========================================================
  */
+function SafeSelect({ label, value, onChange, options, placeholder = "Selecione…", disabled, renderOption }) {
+  const [open, setOpen] = useState(false);
+  const rootRef = useRef(null);
 
+  const current = useMemo(() => options.find((o) => String(o.value) === String(value)) ?? null, [options, value]);
+
+  useEffect(() => {
+    function onDocClick(e) {
+      if (!open) return;
+      if (!rootRef.current) return;
+      if (rootRef.current.contains(e.target)) return;
+      setOpen(false);
+    }
+    document.addEventListener("mousedown", onDocClick);
+    document.addEventListener("touchstart", onDocClick, { passive: true });
+    return () => {
+      document.removeEventListener("mousedown", onDocClick);
+      document.removeEventListener("touchstart", onDocClick);
+    };
+  }, [open]);
+
+  return (
+    <div ref={rootRef} style={{ position: "relative", minWidth: 320, opacity: disabled ? 0.6 : 1 }}>
+      {label ? <label style={{ fontSize: 12, opacity: 0.85 }}>{label}</label> : null}
+
+      <button
+        type="button"
+        disabled={disabled}
+        onClick={() => setOpen((v) => !v)}
+        style={{
+          width: "100%",
+          padding: 10,
+          textAlign: "left",
+          border: "1px solid #ccc",
+          borderRadius: 10,
+          cursor: disabled ? "not-allowed" : "pointer",
+          background: "#fff",
+        }}
+      >
+        {current ? (
+          <span style={{ fontWeight: 800 }}>{renderOption ? renderOption(current.raw) : current.label}</span>
+        ) : (
+          <span style={{ opacity: 0.7 }}>{placeholder}</span>
+        )}
+        <span style={{ float: "right", opacity: 0.6 }}>▾</span>
+      </button>
+
+      {open ? (
+        <div
+          style={{
+            position: "absolute",
+            left: 0,
+            right: 0,
+            top: 58,
+            background: "#fff",
+            border: "1px solid #ccc",
+            borderRadius: 12,
+            boxShadow: "0 10px 30px rgba(0,0,0,.18)",
+            zIndex: 9999,
+            maxHeight: 320,
+            overflow: "auto",
+          }}
+        >
+          <div style={{ padding: 10, borderBottom: "1px solid #eee", fontSize: 12, opacity: 0.75 }}>
+            {placeholder}
+          </div>
+
+          {options.map((opt) => (
+            <div
+              key={String(opt.value)}
+              onMouseDown={(e) => e.preventDefault()}
+              onClick={() => {
+                setOpen(false);
+                onChange(String(opt.value));
+              }}
+              style={{
+                padding: "10px 12px",
+                borderTop: "1px solid #f0f0f0",
+                cursor: "pointer",
+                background: String(opt.value) === String(value) ? "#f7f7f7" : "#fff",
+              }}
+            >
+              <div style={{ fontWeight: 900, fontSize: 13 }}>
+                {renderOption ? renderOption(opt.raw) : opt.label}
+              </div>
+              {opt.sub ? <div style={{ fontSize: 12, opacity: 0.7, marginTop: 2 }}>{opt.sub}</div> : null}
+            </div>
+          ))}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+/**
+ * =========================================================
+ * Subresponsável Autocomplete (com confirmação via PIN)
+ * =========================================================
+ */
 function SubresponsavelPicker({
   kitId,
   patrimonio,
@@ -92,6 +176,7 @@ function SubresponsavelPicker({
 
   const lastQueryRef = useRef("");
   const debounceRef = useRef(null);
+  const blurCloseRef = useRef(null);
 
   // Sincroniza texto externo -> input local
   useEffect(() => {
@@ -105,11 +190,9 @@ function SubresponsavelPicker({
 
     if (debounceRef.current) clearTimeout(debounceRef.current);
 
-    // Se o usuário apagou, zera opções e "desseleciona"
     if (!q) {
       setOptions([]);
       setOpen(false);
-      // não mexe no selectedId automaticamente (evita perder seleção por acidente)
       return;
     }
 
@@ -119,9 +202,8 @@ function SubresponsavelPicker({
         lastQueryRef.current = q;
 
         const res = await searchSubresponsaveis(q);
-        const list = safeArray(res); // backend pode vir [] ou {value:[]}
+        const list = safeArray(res);
 
-        // Só aplica se for a busca mais recente
         if (lastQueryRef.current !== q) return;
 
         setOptions(list);
@@ -141,7 +223,6 @@ function SubresponsavelPicker({
   }, [typing]);
 
   function handlePick(opt) {
-    // opt: {id, nome, secao, ativo}
     const label = `${opt.nome}`;
     setTyping(label);
     setOpen(false);
@@ -162,14 +243,13 @@ function SubresponsavelPicker({
       return;
     }
 
-    // Backend barra GPS inválido. Então aqui a gente bloqueia antes.
     if (!isGpsValid(geo)) {
       setMsg("GPS indisponível/inválido. Não dá pra confirmar distribuição sem localização.");
       return;
     }
 
     const pin = window.prompt("PIN do subresponsável (6 dígitos):");
-    if (pin == null) return; // cancelou
+    if (pin == null) return;
     const pinTrim = String(pin).trim();
 
     if (!/^\d{6}$/.test(pinTrim)) {
@@ -192,17 +272,12 @@ function SubresponsavelPicker({
         observacao: "PWA",
       };
 
-      // chama o backend (movimentos/distribuir)
       await apiDistribuir(payload);
 
       setMsg("✅ Distribuição confirmada.");
       onConfirmSuccess?.();
     } catch (e) {
-      // Mostra o erro real (quando vier JSON stringado pelo fetch)
-      const t = e?.message ?? String(e);
-
-      // Se o backend manda {"detail":"..."} no texto, o nosso apiPost já joga isso no message
-      setMsg(t.includes("detail") ? t : t);
+      setMsg(e?.message ?? String(e));
     } finally {
       setConfirming(false);
     }
@@ -224,12 +299,12 @@ function SubresponsavelPicker({
             if (options.length) setOpen(true);
           }}
           onBlur={() => {
-            // fecha com pequeno atraso para permitir clique na lista
-            setTimeout(() => setOpen(false), 150);
+            // evita fechar no mesmo tick (android + input + lista)
+            if (blurCloseRef.current) clearTimeout(blurCloseRef.current);
+            blurCloseRef.current = setTimeout(() => setOpen(false), 180);
           }}
         />
 
-        {/* Dropdown */}
         {open && options.length > 0 ? (
           <div
             style={{
@@ -250,7 +325,7 @@ function SubresponsavelPicker({
           >
             {options.map((opt) => (
               <div
-                key={opt.id}
+                key={opt.id} // ✅ key estável
                 onMouseDown={(e) => e.preventDefault()}
                 onClick={() => handlePick(opt)}
                 style={{
@@ -271,12 +346,9 @@ function SubresponsavelPicker({
           </div>
         ) : null}
 
-        {/* Loading / mensagem */}
         <div style={{ marginTop: 6, fontSize: 12, opacity: 0.8 }}>
           {loading ? "Buscando..." : null}
-          {msg ? (
-            <span style={{ marginLeft: 8, color: msg.startsWith("✅") ? "#0b7a38" : "#b00020" }}>{msg}</span>
-          ) : null}
+          {msg ? <span style={{ marginLeft: 8, color: msg.startsWith("✅") ? "#0b7a38" : "#b00020" }}>{msg}</span> : null}
         </div>
       </div>
 
@@ -295,11 +367,7 @@ function SubresponsavelPicker({
           height: 38,
           whiteSpace: "nowrap",
         }}
-        title={
-          !isGpsValid(geo)
-            ? "GPS inválido — backend não aceita distribuição sem localização"
-            : "Confirmar distribuição (PIN 6 dígitos)"
-        }
+        title={!isGpsValid(geo) ? "GPS inválido — backend não aceita distribuição sem localização" : "Confirmar distribuição (PIN 6 dígitos)"}
       >
         {confirming ? "Confirmando..." : "Confirmar"}
       </button>
@@ -315,9 +383,6 @@ function SubresponsavelPicker({
 export default function App() {
   const apiBase = import.meta.env.VITE_API_URL;
 
-  /**
-   * Dados mestres
-   */
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState("");
 
@@ -325,31 +390,14 @@ export default function App() {
   const [encarregados, setEncarregados] = useState([]);
   const [kits, setKits] = useState([]);
 
-  /**
-   * Seleções
-   */
   const [selectedKitId, setSelectedKitId] = useState("");
   const [selectedEncarregadoId, setSelectedEncarregadoId] = useState("");
 
-  /**
-   * Itens do kit (detalhados) e busca
-   */
-  const [kitItens, setKitItens] = useState([]); // [{kit_item_id, kit_id, item_id, quantidade, patrimonio, descricao}]
+  const [kitItens, setKitItens] = useState([]);
   const [q, setQ] = useState("");
 
-  /**
-   * statusMap[kit_item_id] = {
-   *   status: "PRESENTE" | "DISTRIBUIDO" | null,
-   *   subresponsavel_text: string,
-   *   subresponsavel_id: number|null,
-   *   distribuicao_confirmada: boolean
-   * }
-   */
   const [statusMap, setStatusMap] = useState({});
 
-  /**
-   * GPS / Geolocalização
-   */
   const [geo, setGeo] = useState({
     ok: false,
     latitude: 0,
@@ -358,17 +406,9 @@ export default function App() {
     gps_timestamp: null,
   });
 
-  /**
-   * Submit
-   */
   const [submitting, setSubmitting] = useState(false);
   const [lastSubmit, setLastSubmit] = useState("");
 
-  /**
-   * =========================================================
-   * Carga inicial (robusta)
-   * =========================================================
-   */
   async function loadMasters() {
     setLoading(true);
     setErr("");
@@ -380,13 +420,24 @@ export default function App() {
         withRetry(() => apiGet("/kits/"), 2, 300),
       ]);
 
-      setSetores(safeArray(setoresRes));
-      setEncarregados(safeArray(encRes));
-      setKits(safeArray(kitsRes));
+      console.log("[masters] setores raw:", setoresRes);
+      console.log("[masters] encarregados raw:", encRes);
+      console.log("[masters] kits raw:", kitsRes);
+
+      const setoresList = safeArray(setoresRes);
+      const encList = safeArray(encRes);
+      const kitsList = safeArray(kitsRes);
+
+      console.log("[masters] setores:", setoresList.length);
+      console.log("[masters] encarregados:", encList.length);
+      console.log("[masters] kits:", kitsList.length);
+
+      setSetores(setoresList);
+      setEncarregados(encList);
+      setKits(kitsList);
     } catch (e) {
       console.error("loadMasters error:", e);
       setErr(e?.message ?? "Falha ao buscar (rede instável). Tente recarregar.");
-      // NÃO zera estados aqui; mantém o que tiver (se tiver)
     } finally {
       setLoading(false);
     }
@@ -398,9 +449,8 @@ export default function App() {
   }, []);
 
   /**
-   * =========================================================
-   * GPS (best effort)
-   * =========================================================
+   * GPS
+   * - se não for secure context, NÃO tenta (evita spam e instabilidade)
    */
   useEffect(() => {
     if (!("geolocation" in navigator)) {
@@ -408,34 +458,48 @@ export default function App() {
       return;
     }
 
-    // tenta obter uma vez; se quiser, dá pra evoluir para watchPosition
-    navigator.geolocation.getCurrentPosition(
-      (pos) => {
-        const lat = pos.coords.latitude ?? 0;
-        const lng = pos.coords.longitude ?? 0;
-        const acc = pos.coords.accuracy ?? 0;
+    if (!window.isSecureContext) {
+      // Chrome em http LAN bloqueia e solta erro 1
+      setGeo((g) => ({ ...g, ok: false }));
+      return;
+    }
 
-        setGeo({
-          ok: true,
-          latitude: lat,
-          longitude: lng,
-          accuracy_m: acc,
-          gps_timestamp: new Date().toISOString(),
-        });
-      },
-      (e) => {
-        console.warn("GPS error:", e);
-        setGeo((g) => ({ ...g, ok: false }));
-      },
-      { enableHighAccuracy: true, timeout: 12000, maximumAge: 0 }
-    );
+    let cancelled = false;
+
+    const run = () => {
+      navigator.geolocation.getCurrentPosition(
+        (pos) => {
+          if (cancelled) return;
+          const lat = pos.coords.latitude ?? 0;
+          const lng = pos.coords.longitude ?? 0;
+          const acc = pos.coords.accuracy ?? 0;
+
+          setGeo({
+            ok: true,
+            latitude: lat,
+            longitude: lng,
+            accuracy_m: acc,
+            gps_timestamp: new Date().toISOString(),
+          });
+        },
+        (e) => {
+          if (cancelled) return;
+          console.warn("GPS error:", e);
+          setGeo((g) => ({ ...g, ok: false }));
+        },
+        { enableHighAccuracy: true, timeout: 12000, maximumAge: 0 }
+      );
+    };
+
+    run();
+    const t = setTimeout(run, 4000); // retry leve
+
+    return () => {
+      cancelled = true;
+      clearTimeout(t);
+    };
   }, []);
 
-  /**
-   * =========================================================
-   * Carrega itens do kit quando muda kit
-   * =========================================================
-   */
   useEffect(() => {
     (async () => {
       if (!selectedKitId) {
@@ -452,7 +516,6 @@ export default function App() {
 
         setKitItens(list);
 
-        // inicializa statusMap por kit_item_id
         const next = {};
         for (const it of list) {
           next[it.kit_item_id] = {
@@ -472,11 +535,6 @@ export default function App() {
     })();
   }, [selectedKitId]);
 
-  /**
-   * =========================================================
-   * Label do kit
-   * =========================================================
-   */
   const kitLabel = useMemo(() => {
     const k = kits.find((x) => String(x.id) === String(selectedKitId));
     if (!k) return "";
@@ -484,11 +542,6 @@ export default function App() {
     return `${k.nome} • ${setor} • ${k.tipo ?? ""}`.trim();
   }, [kits, setores, selectedKitId]);
 
-  /**
-   * =========================================================
-   * Filtragem por busca (somente itens do kit)
-   * =========================================================
-   */
   const filtered = useMemo(() => {
     const nq = norm(q);
     if (!nq) return kitItens;
@@ -500,11 +553,6 @@ export default function App() {
     });
   }, [kitItens, q]);
 
-  /**
-   * =========================================================
-   * Contadores
-   * =========================================================
-   */
   const totals = useMemo(() => {
     const total = kitItens.length;
     let presente = 0;
@@ -521,25 +569,13 @@ export default function App() {
     return { total, presente, distribuido, pendente };
   }, [kitItens, statusMap]);
 
-  /**
-   * =========================================================
-   * Regras de envio do CHECKLIST (kit completo)
-   * =========================================================
-   *
-   * - precisa kit e encarregado
-   * - NÃO pode ter pendente (kit completo)
-   * - se DISTRIBUIDO, precisa estar CONFIRMADO (movimentos) e com subresponsavel_id
-   * =========================================================
-   */
   const canSubmit = useMemo(() => {
     if (!selectedKitId) return false;
     if (!selectedEncarregadoId) return false;
     if (kitItens.length === 0) return false;
 
-    // kit completo
     if (totals.pendente > 0) return false;
 
-    // distribuído precisa de confirmação + id
     for (const ki of kitItens) {
       const st = statusMap[ki.kit_item_id];
       if (st?.status === "DISTRIBUIDO") {
@@ -551,11 +587,6 @@ export default function App() {
     return true;
   }, [selectedKitId, selectedEncarregadoId, kitItens, totals.pendente, statusMap]);
 
-  /**
-   * =========================================================
-   * Mutators (status por item)
-   * =========================================================
-   */
   function setItemStatus(kitItemId, status) {
     setStatusMap((prev) => {
       const cur = prev[kitItemId] ?? {
@@ -565,7 +596,6 @@ export default function App() {
         distribuicao_confirmada: false,
       };
 
-      // Se voltou para PRESENTE, limpa dados de distribuição
       if (status === "PRESENTE") {
         return {
           ...prev,
@@ -579,7 +609,6 @@ export default function App() {
         };
       }
 
-      // Se setou DISTRIBUIDO, mantém o que já digitou/selecionou
       if (status === "DISTRIBUIDO") {
         return {
           ...prev,
@@ -590,7 +619,6 @@ export default function App() {
         };
       }
 
-      // null = pendente
       return {
         ...prev,
         [kitItemId]: {
@@ -621,11 +649,6 @@ export default function App() {
     });
   }
 
-  /**
-   * =========================================================
-   * Confirm callback (quando distribuir via PIN dá certo)
-   * =========================================================
-   */
   function markDistribConfirmado(kitItemId) {
     setStatusMap((prev) => {
       const cur = prev[kitItemId];
@@ -640,15 +663,6 @@ export default function App() {
     });
   }
 
-  /**
-   * =========================================================
-   * POST checklist (modelo atual do backend)
-   *
-   * Observação:
-   * - backend hoje salva "patrimonios_declarados" no checklist semanal
-   * - movimentos (distribuir/recolher) ficam na tabela item_movimentos
-   * =========================================================
-   */
   async function submitChecklist() {
     setSubmitting(true);
     setErr("");
@@ -658,7 +672,6 @@ export default function App() {
       const encId = Number(selectedEncarregadoId);
       const kitId = Number(selectedKitId);
 
-      // Monta texto compatível (auditoria)
       const lines = [];
       for (const ki of kitItens) {
         const st = statusMap[ki.kit_item_id];
@@ -693,11 +706,6 @@ export default function App() {
     }
   }
 
-  /**
-   * =========================================================
-   * UI
-   * =========================================================
-   */
   if (loading) {
     return (
       <div style={{ padding: 16, fontFamily: "system-ui" }}>
@@ -711,6 +719,19 @@ export default function App() {
   }
 
   const gpsLabel = isGpsValid(geo) ? "GPS ok" : geo.ok ? "GPS inválido" : "GPS indisponível";
+
+  const kitOptions = kits.map((k) => ({
+    value: String(k.id),
+    label: `#${k.id} • ${k.nome}`,
+    raw: k,
+  }));
+
+  const encarregadoOptions = encarregados.map((x) => ({
+    value: String(x.id),
+    label: `#${x.id} • ${x.nome}`,
+    sub: x.funcao ? `(${x.funcao})` : "(—)",
+    raw: x,
+  }));
 
   return (
     <div style={{ padding: 16, fontFamily: "system-ui", maxWidth: 1200, margin: "0 auto" }}>
@@ -746,42 +767,25 @@ export default function App() {
 
       {/* Seleções */}
       <div style={{ display: "flex", gap: 12, flexWrap: "wrap", marginBottom: 12 }}>
-        <div style={{ minWidth: 320 }}>
-          <label style={{ fontSize: 12, opacity: 0.85 }}>Kit</label>
-          <select
-            style={{ width: "100%", padding: 10 }}
-            value={selectedKitId}
-            onChange={(e) => setSelectedKitId(e.target.value)}
-          >
-            <option value="">Selecione…</option>
-            {kits.map((k) => (
-              <option key={k.id} value={k.id}>
-                #{k.id} • {k.nome}
-              </option>
-            ))}
-          </select>
-          {selectedKitId ? <div style={{ fontSize: 12, opacity: 0.75, marginTop: 6 }}>{kitLabel}</div> : null}
+        <SafeSelect
+          label="Kit"
+          value={selectedKitId}
+          onChange={(v) => setSelectedKitId(v)}
+          options={kitOptions}
+          placeholder="Selecione…"
+        />
+
+        <div style={{ minWidth: 320, flex: "0 0 auto" }}>
+          {selectedKitId ? <div style={{ fontSize: 12, opacity: 0.75, marginTop: 22 }}>{kitLabel}</div> : null}
         </div>
 
-        <div style={{ minWidth: 320 }}>
-          <label style={{ fontSize: 12, opacity: 0.85 }}>Encarregado</label>
-          <select
-            style={{ width: "100%", padding: 10 }}
-            value={selectedEncarregadoId}
-            onChange={(e) => setSelectedEncarregadoId(e.target.value)}
-          >
-            <option value="">Selecione…</option>
-            {encarregados.map((x) => (
-              <option key={x.id} value={x.id}>
-                #{x.id} • {x.nome} ({x.funcao ?? "—"})
-              </option>
-            ))}
-          </select>
-
-          <div style={{ fontSize: 12, opacity: 0.75, marginTop: 6 }}>
-            Sem encarregado selecionado, sem checklist. A vida é dura.
-          </div>
-        </div>
+        <SafeSelect
+          label="Encarregado"
+          value={selectedEncarregadoId}
+          onChange={(v) => setSelectedEncarregadoId(v)}
+          options={encarregadoOptions}
+          placeholder="Selecione…"
+        />
 
         <div style={{ flex: 1, minWidth: 280 }}>
           <label style={{ fontSize: 12, opacity: 0.85 }}>Busca (patrimônio ou descrição)</label>
@@ -870,7 +874,7 @@ export default function App() {
 
               return (
                 <div
-                  key={x.kit_item_id}
+                  key={x.kit_item_id} // ✅ key estável
                   style={{
                     padding: 12,
                     borderTop: "1px solid #eee",
@@ -959,7 +963,6 @@ export default function App() {
                         selectedId={st.subresponsavel_id}
                         disabled={!selectedKitId || !selectedEncarregadoId}
                         onPick={({ id, nome }) => {
-                          // preenche texto + id, mas confirmação ainda não aconteceu
                           setStatusMap((prev) => {
                             const cur = prev[x.kit_item_id];
                             if (!cur) return prev;
@@ -974,9 +977,7 @@ export default function App() {
                             };
                           });
                         }}
-                        onConfirmSuccess={() => {
-                          markDistribConfirmado(x.kit_item_id);
-                        }}
+                        onConfirmSuccess={() => markDistribConfirmado(x.kit_item_id)}
                       />
                     ) : null}
                   </div>
@@ -988,9 +989,9 @@ export default function App() {
       )}
 
       <div style={{ marginTop: 14, fontSize: 12, opacity: 0.75 }}>
-        Regra: checklist só envia com <b>kit completo</b> (sem pendente). Distribuído exige seleção + confirmação (PIN 6 dígitos).<br />
-        Nota: backend <b>não aceita</b> distribuição com GPS inválido (0,0). Se o GPS do desktop não vier, a próxima evolução é “Obra/Local manual”
-        para auditar sem depender do GPS.
+        Regra: checklist só envia com <b>kit completo</b> (sem pendente). Distribuído exige seleção + confirmação (PIN 6 dígitos).
+        <br />
+        Nota: backend <b>não aceita</b> distribuição com GPS inválido (0,0).
       </div>
     </div>
   );

@@ -1,6 +1,6 @@
 from datetime import datetime
 from pydantic import BaseModel
-from typing import List, Optional
+from typing import Optional
 
 
 # ========= ITENS =========
@@ -116,3 +116,50 @@ class ChecklistSemanal(ChecklistSemanalBase):
 
     class Config:
         from_attributes = True
+
+
+# ========= SUBRESPONSÁVEIS =========
+
+class SubresponsavelBase(BaseModel):
+    nome: str
+    secao: Optional[str] = None
+    ativo: Optional[bool] = True
+
+
+class Subresponsavel(SubresponsavelBase):
+    id: int
+
+    class Config:
+        from_attributes = True
+
+
+class DefinirPinRequest(BaseModel):
+    pin: str
+
+
+# ========= MOVIMENTOS (payloads) =========
+
+class MovimentoDistribuirRequest(BaseModel):
+    kit_id: int
+    patrimonio: str
+    encarregado_id: int
+    subresponsavel_id: int
+    pin: str
+
+    lat: Optional[float] = None
+    lng: Optional[float] = None
+    accuracy_m: Optional[float] = None
+    gps_timestamp: Optional[str] = None
+    observacao: Optional[str] = None
+
+
+class MovimentoRecolherRequest(BaseModel):
+    kit_id: int
+    patrimonio: str
+    encarregado_id: int
+
+    lat: Optional[float] = None
+    lng: Optional[float] = None
+    accuracy_m: Optional[float] = None
+    gps_timestamp: Optional[str] = None
+    observacao: Optional[str] = None

@@ -8,14 +8,6 @@ from typing import Optional
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
-# Usa as funções de segurança que você já tem
-# (hash_pin / verify_pin). Se seu utils/security.py não tiver verify_pin,
-# eu já tratei isso com fallback (mensagem clara).
-try:
-    from ..utils.security import verify_pin  # type: ignore
-except Exception:  # pragma: no cover
-    verify_pin = None  # fallback tratado abaixo
-
 
 router = APIRouter(prefix="/movimentos", tags=["movimentos"])
 
@@ -62,7 +54,7 @@ def _ensure_schema() -> None:
         """
     )
 
-    # Colunas extras (tentativa “best effort”)
+    # Colunas extras (best effort)
     for stmt in [
         "ALTER TABLE item_movimentos ADD COLUMN lat REAL DEFAULT 0",
         "ALTER TABLE item_movimentos ADD COLUMN lng REAL DEFAULT 0",
@@ -74,7 +66,6 @@ def _ensure_schema() -> None:
         try:
             cur.execute(stmt)
         except sqlite3.OperationalError:
-            # coluna já existe (ou SQLite antigo); ignora
             pass
 
     con.commit()
@@ -98,7 +89,7 @@ class DistribuirBody(BaseModel):
 
     lat: float = 0
     lng: float = 0
-    accuracy_m: float = 0  # obrigatório no seu schema anterior: aqui garantido sempre
+    accuracy_m: float = 0
     gps_timestamp: Optional[str] = None
     observacao: Optional[str] = None
 
@@ -127,7 +118,7 @@ def _validate_pin(pin: str) -> None:
 def _get_subresponsavel(con: sqlite3.Connection, sub_id: int) -> sqlite3.Row:
     cur = con.cursor()
     row = cur.execute(
-        "SELECT id, nome, secao, ativo, pin_hash FROM subresponsaveis WHERE id=?",
+        "SELECT id, nome, secao, ativo, pin FROM subresponsaveis WHERE id=?",
         (sub_id,),
     ).fetchone()
 
@@ -137,34 +128,21 @@ def _get_subresponsavel(con: sqlite3.Connection, sub_id: int) -> sqlite3.Row:
     if int(row["ativo"] or 0) != 1:
         raise HTTPException(status_code=400, detail="Subresponsável inativo")
 
-    if not row["pin_hash"]:
+    pin_db = (row["pin"] or "").strip()
+    if not pin_db:
         raise HTTPException(status_code=400, detail="Subresponsável sem PIN cadastrado")
 
     return row
 
 
-def _check_pin(pin: str, pin_hash: str) -> None:
-    """
-    Verifica PIN com o verify_pin do utils/security.py.
-    Se o verify_pin não existir, dá erro orientando.
-    """
-    if verify_pin is None:
-        raise HTTPException(
-            status_code=500,
-            detail="verify_pin não encontrado em utils/security.py. Implemente verify_pin(pin, pin_hash).",
-        )
-
-    try:
-        ok = bool(verify_pin(pin, pin_hash))
-    except Exception as e:
-        # erro típico: passlib/bcrypt quebrado
-        raise HTTPException(
-            status_code=500,
-            detail=f"Falha ao validar PIN (biblioteca de hash). Erro: {type(e).__name__}: {e}",
-        )
-
-    if not ok:
+def _check_pin(pin_informado: str, pin_db: str) -> None:
+    # Comparação direta (tático). Depois a gente migra pra pin_hash com backfill e bcrypt.
+    if str(pin_informado).strip() != str(pin_db).strip():
         raise HTTPException(status_code=401, detail="PIN incorreto")
+
+
+def _gps_ok(lat: float, lng: float) -> int:
+    return 0 if (float(lat) == 0.0 and float(lng) == 0.0) else 1
 
 
 # =========================
@@ -172,10 +150,11 @@ def _check_pin(pin: str, pin_hash: str) -> None:
 # =========================
 
 @router.post("/distribuir")
+@router.post("/distribuir/")
 def distribuir_item(body: DistribuirBody):
     """
     Registra um movimento DISTRIBUIR.
-    - NÃO bloqueia se GPS vier 0,0 (desktop/ambiente sem permissão).
+    - NÃO bloqueia se GPS vier 0,0 (ambiente sem permissão).
     - Mantém auditável: gps_ok = 1 quando lat/lng != 0.
     """
     _validate_pin(body.pin)
@@ -183,9 +162,9 @@ def distribuir_item(body: DistribuirBody):
     con = _connect()
     try:
         sub = _get_subresponsavel(con, body.subresponsavel_id)
-        _check_pin(body.pin, sub["pin_hash"])
+        _check_pin(body.pin, sub["pin"])
 
-        gps_ok = 0 if (float(body.lat) == 0.0 and float(body.lng) == 0.0) else 1
+        gps_ok = _gps_ok(body.lat, body.lng)
 
         created_at = _utc_now_iso()
         gps_ts = body.gps_timestamp or created_at
@@ -239,6 +218,7 @@ def distribuir_item(body: DistribuirBody):
 
 
 @router.post("/recolher")
+@router.post("/recolher/")
 def recolher_item(body: RecolherBody):
     """
     Registra um movimento RECOLHER.
@@ -247,7 +227,7 @@ def recolher_item(body: RecolherBody):
     """
     con = _connect()
     try:
-        gps_ok = 0 if (float(body.lat) == 0.0 and float(body.lng) == 0.0) else 1
+        gps_ok = _gps_ok(body.lat, body.lng)
 
         created_at = _utc_now_iso()
         gps_ts = body.gps_timestamp or created_at

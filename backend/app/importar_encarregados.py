@@ -1,125 +1,175 @@
+# importar_encarregados.py
+# Importa encarregados a partir do Excel contatos_lideres_marica.xlsx
+# e grava no banco ferramental.db (na raiz do repositório).
+#
+# Rodar a partir da pasta backend (recomendado):
+#   cd backend
+#   python ..\importar_encarregados.py
+
 from __future__ import annotations
 
-import argparse
 import re
+import sqlite3
 from pathlib import Path
 
-import pandas as pd
-
-from backend.app.database import SessionLocal
-from backend.app import models
+from openpyxl import load_workbook
 
 
-def only_digits(s: str) -> str:
-    return re.sub(r"\D+", "", (s or "").strip())
+def norm(s: str) -> str:
+    s = (s or "").strip().lower()
+    # normalização simples (sem dependências)
+    s = (
+        s.replace("ç", "c")
+        .replace("á", "a").replace("à", "a").replace("ã", "a").replace("â", "a")
+        .replace("é", "e").replace("ê", "e")
+        .replace("í", "i")
+        .replace("ó", "o").replace("ô", "o").replace("õ", "o")
+        .replace("ú", "u")
+    )
+    s = re.sub(r"\s+", " ", s)
+    return s
 
 
-def norm_text(s: str) -> str:
-    return (s or "").strip()
-
-
-def find_col(df: pd.DataFrame, *candidates: str) -> str | None:
-    cols = {str(c).strip().lower(): c for c in df.columns}
+def pick_col(headers: list[str], candidates: list[str]) -> int | None:
+    nheaders = [norm(h) for h in headers]
     for cand in candidates:
-        key = cand.strip().lower()
-        if key in cols:
-            return cols[key]
+        candn = norm(cand)
+        for i, h in enumerate(nheaders):
+            if candn == h or candn in h:
+                return i
     return None
 
 
-def main():
-    ap = argparse.ArgumentParser()
-    ap.add_argument("--xlsx", required=True, help="Caminho do .xlsx")
-    ap.add_argument("--sheet", default=None, help="Nome da aba (opcional). Se vazio, usa a 1ª.")
-    ap.add_argument("--dry", action="store_true", help="Não grava no banco (só simula).")
-    args = ap.parse_args()
+def ensure_schema(con: sqlite3.Connection) -> None:
+    cur = con.cursor()
+    # setores
+    cur.execute(
+        """
+        CREATE TABLE IF NOT EXISTS setores (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            nome TEXT NOT NULL UNIQUE
+        );
+        """
+    )
+    # encarregados
+    cur.execute(
+        """
+        CREATE TABLE IF NOT EXISTS encarregados (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            setor_id INTEGER NOT NULL,
+            funcao TEXT,
+            nome TEXT NOT NULL,
+            telefone TEXT,
+            FOREIGN KEY(setor_id) REFERENCES setores(id)
+        );
+        """
+    )
+    con.commit()
 
-    xlsx_path = Path(args.xlsx)
+
+def get_or_create_setor(con: sqlite3.Connection, nome: str) -> int:
+    nome = (nome or "").strip()
+    if not nome:
+        nome = "SEM SETOR"
+    cur = con.cursor()
+    row = cur.execute("SELECT id FROM setores WHERE nome = ?", (nome,)).fetchone()
+    if row:
+        return int(row[0])
+    cur.execute("INSERT INTO setores (nome) VALUES (?)", (nome,))
+    con.commit()
+    return int(cur.lastrowid)
+
+
+def exists_encarregado(con: sqlite3.Connection, setor_id: int, nome: str) -> bool:
+    cur = con.cursor()
+    row = cur.execute(
+        "SELECT 1 FROM encarregados WHERE setor_id=? AND nome=? LIMIT 1",
+        (setor_id, nome),
+    ).fetchone()
+    return bool(row)
+
+
+def main() -> None:
+    repo_root = Path(__file__).resolve().parent
+    db_path = repo_root / "ferramental.db"
+    xlsx_path = repo_root / "contatos_lideres_marica.xlsx"
+
+    if not db_path.exists():
+        raise SystemExit(f"DB não encontrado: {db_path}")
+
     if not xlsx_path.exists():
-        raise SystemExit(f"[ERRO] Arquivo não encontrado: {xlsx_path}")
+        raise SystemExit(f"Excel não encontrado: {xlsx_path}")
 
-    # Lê a planilha (se não passar sheet, pega a primeira)
-    if args.sheet:
-        df = pd.read_excel(xlsx_path, sheet_name=args.sheet)
-    else:
-        df = pd.read_excel(xlsx_path)
-
-    # tenta achar colunas (com variações)
-    col_area = find_col(df, "área", "area")
-    col_funcao = find_col(df, "função", "funcao", "funçao")
-    col_nome = find_col(df, "responsavel", "responsável", "responsavel ", "responsável ")
-    col_tel = find_col(df, "contato", "telefone", "celular")
-
-    # fallback por posição se vier “torto”
-    if not all([col_area, col_funcao, col_nome, col_tel]) and df.shape[1] >= 4:
-        # assume: 0=área,1=função,2=responsável,3=contato
-        col_area = col_area or df.columns[0]
-        col_funcao = col_funcao or df.columns[1]
-        col_nome = col_nome or df.columns[2]
-        col_tel = col_tel or df.columns[3]
-
-    db = SessionLocal()
+    con = sqlite3.connect(str(db_path))
     try:
-        setores_criados = 0
-        encarregados_criados = 0
-        encarregados_pulados = 0
+        ensure_schema(con)
 
-        # cache setor_nome -> setor_id
-        setor_cache: dict[str, int] = {}
+        wb = load_workbook(str(xlsx_path), data_only=True)
+        ws = wb.active
 
-        for _, row in df.iterrows():
-            area = norm_text(str(row.get(col_area, "")))
-            funcao = norm_text(str(row.get(col_funcao, "")))
-            nome = norm_text(str(row.get(col_nome, "")))
-            tel = only_digits(str(row.get(col_tel, "")))
+        rows = list(ws.iter_rows(values_only=True))
+        if not rows or len(rows) < 2:
+            raise SystemExit("Excel vazio ou sem linhas suficientes.")
 
-            if not area or not nome:
+        headers = [str(h or "").strip() for h in rows[0]]
+
+        col_setor = pick_col(headers, ["setor", "secao", "seção", "area", "obra", "local"])
+        col_nome = pick_col(headers, ["nome", "colaborador", "responsavel", "encarregado"])
+        col_funcao = pick_col(headers, ["funcao", "função", "cargo"])
+        col_tel = pick_col(headers, ["telefone", "celular", "whatsapp", "fone"])
+
+        if col_nome is None:
+            raise SystemExit(
+                f"Não achei coluna de NOME. Cabeçalhos encontrados: {headers}"
+            )
+
+        inserted = 0
+        skipped = 0
+
+        for r in rows[1:]:
+            vals = list(r)
+
+            nome = (str(vals[col_nome]).strip() if col_nome is not None and vals[col_nome] is not None else "")
+            if not nome:
                 continue
 
-            # setor
-            if area not in setor_cache:
-                setor = db.query(models.Setor).filter(models.Setor.nome == area).first()
-                if not setor:
-                    setor = models.Setor(nome=area)
-                    db.add(setor)
-                    if not args.dry:
-                        db.commit()
-                        db.refresh(setor)
-                    setores_criados += 1
-                setor_cache[area] = setor.id
-
-            setor_id = setor_cache[area]
-
-            # encarregado (dedupe por setor+nome)
-            exists = (
-                db.query(models.Encarregado)
-                .filter(models.Encarregado.setor_id == setor_id)
-                .filter(models.Encarregado.nome == nome)
-                .first()
+            setor = (
+                str(vals[col_setor]).strip()
+                if col_setor is not None and vals[col_setor] is not None
+                else "SEM SETOR"
             )
-            if exists:
-                encarregados_pulados += 1
+
+            funcao = (
+                str(vals[col_funcao]).strip()
+                if col_funcao is not None and vals[col_funcao] is not None
+                else None
+            )
+
+            telefone = (
+                str(vals[col_tel]).strip()
+                if col_tel is not None and vals[col_tel] is not None
+                else None
+            )
+
+            setor_id = get_or_create_setor(con, setor)
+
+            if exists_encarregado(con, setor_id, nome):
+                skipped += 1
                 continue
 
-            novo = models.Encarregado(
-                setor_id=setor_id,
-                funcao=funcao or "Encarregado",
-                nome=nome,
-                telefone=tel,
+            con.execute(
+                "INSERT INTO encarregados (setor_id, funcao, nome, telefone) VALUES (?, ?, ?, ?)",
+                (setor_id, funcao, nome, telefone),
             )
-            db.add(novo)
-            if not args.dry:
-                db.commit()
-                db.refresh(novo)
-            encarregados_criados += 1
+            inserted += 1
 
-        print("✅ IMPORTAÇÃO DE ENCARREGADOS FINALIZADA")
-        print(f"   Setores criados (ou novos encontrados): {setores_criados}")
-        print(f"   Encarregados criados: {encarregados_criados}")
-        print(f"   Encarregados pulados (já existiam): {encarregados_pulados}")
+        con.commit()
 
+        cur = con.cursor()
+        total = cur.execute("SELECT COUNT(1) FROM encarregados").fetchone()[0]
+        print(f"OK ✅ Import finalizado. Inseridos={inserted} | Duplicados ignorados={skipped} | Total encarregados={total}")
     finally:
-        db.close()
+        con.close()
 
 
 if __name__ == "__main__":

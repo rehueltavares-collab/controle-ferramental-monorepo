@@ -2,7 +2,7 @@
 
 function norm(path) {
   if (!path.startsWith("/")) path = `/${path}`;
-  // mantÃ©m sua regra: adiciona "/" no final quando nÃ£o tem "?" e nÃ£o Ã© "/"
+  // adiciona "/" no final quando não tem "?" e não é "/"
   if (path !== "/" && !path.includes("?") && !path.endsWith("/")) path += "/";
   return path;
 }
@@ -21,6 +21,7 @@ export async function apiPost(path, body) {
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body),
   });
+
   if (!res.ok) {
     const t = await res.text().catch(() => "");
     throw new Error(`POST ${p} -> ${res.status} ${t}`);
@@ -29,10 +30,50 @@ export async function apiPost(path, body) {
 }
 
 // ===============================
-// SUBRESPONSÃVEIS
+// DADOS BASE (PWA)
+// ===============================
+export async function listSetores() {
+  return apiGet("/setores");
+}
+
+export async function listEncarregados(setorId = null) {
+  if (setorId == null) return apiGet("/encarregados");
+  return apiGet(`/encarregados?setor_id=${encodeURIComponent(setorId)}`);
+}
+
+export async function listKits(setorId = null) {
+  if (setorId == null) return apiGet("/kits");
+  return apiGet(`/kits?setor_id=${encodeURIComponent(setorId)}`);
+}
+
+export async function listItens() {
+  return apiGet("/itens");
+}
+
+export async function listKitItens(kitId) {
+  return apiGet(`/kits/${kitId}/itens`);
+}
+
+export async function listKitItensDetalhados(kitId) {
+  return apiGet(`/kits/${kitId}/itens-detalhados`);
+}
+
+// ===============================
+// CHECKLIST SEMANAL
+// ===============================
+export async function criarChecklistSemanal(payload) {
+  return apiPost("/checklists-semanais", payload);
+}
+
+export async function listChecklistsSemanais() {
+  return apiGet("/checklists-semanais");
+}
+
+// ===============================
+// SUBRESPONSÁVEIS
 // ===============================
 export async function searchSubresponsaveis(query = "") {
-  // aqui NÃƒO pode adicionar "/" no final depois do "?" (sua norm jÃ¡ evita isso)
+  // não pode adicionar "/" no final depois do "?" (norm já evita)
   return apiGet(`/subresponsaveis?query=${encodeURIComponent(query)}`);
 }
 
@@ -50,6 +91,3 @@ export async function distribuir(payload) {
 export async function recolher(payload) {
   return apiPost(`/movimentos/recolher`, payload);
 }
-
-
-
