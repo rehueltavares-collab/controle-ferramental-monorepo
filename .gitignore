@@ -33,3 +33,4 @@ pwa/.env.*
 pwa/.env
 pwa/.env.*
 
+platform-tools/
