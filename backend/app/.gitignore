@@ -1,5 +1,18 @@
+# Python
 .venv/
 __pycache__/
 *.pyc
-ferramental.db
+
+# Env & secrets
 .env
+.env.*
+
+# Database (DEV)
+*.db
+backend/data/
+
+# OS / editor
+.DS_Store
+.vscode/
+.idea/
+*.log
