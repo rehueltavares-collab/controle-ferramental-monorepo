@@ -139,9 +139,7 @@ function SafeSelect({ label, value, onChange, options, placeholder = "Selecione�
                 background: String(opt.value) === String(value) ? "#f7f7f7" : "#fff",
               }}
             >
-              <div style={{ fontWeight: 900, fontSize: 13 }}>
-                {renderOption ? renderOption(opt.raw) : opt.label}
-              </div>
+              <div style={{ fontWeight: 900, fontSize: 13 }}>{renderOption ? renderOption(opt.raw) : opt.label}</div>
               {opt.sub ? <div style={{ fontSize: 12, opacity: 0.7, marginTop: 2 }}>{opt.sub}</div> : null}
             </div>
           ))}
@@ -155,6 +153,10 @@ function SafeSelect({ label, value, onChange, options, placeholder = "Selecione�
  * =========================================================
  * Subresponsável Autocomplete (com confirmação via PIN)
  * =========================================================
+ *
+ * ✅ ALTERAÇÃO CRÍTICA:
+ * - distribuição NÃO trava mais por GPS.
+ * - se GPS estiver ruim, envia 0,0 mas deixa AUDITÁVEL (observacao).
  */
 function SubresponsavelPicker({
   kitId,
@@ -243,10 +245,8 @@ function SubresponsavelPicker({
       return;
     }
 
-    if (!isGpsValid(geo)) {
-      setMsg("GPS indisponível/inválido. Não dá pra confirmar distribuição sem localização.");
-      return;
-    }
+    // ✅ NÃO BLOQUEIA POR GPS
+    const gpsOk = isGpsValid(geo);
 
     const pin = window.prompt("PIN do subresponsável (6 dígitos):");
     if (pin == null) return;
@@ -269,12 +269,12 @@ function SubresponsavelPicker({
         lng: Number(geo.longitude ?? 0),
         accuracy_m: Number(geo.accuracy_m ?? 0),
         gps_timestamp: geo.gps_timestamp ?? new Date().toISOString(),
-        observacao: "PWA",
+        observacao: gpsOk ? "PWA" : "PWA (GPS indisponível)",
       };
 
       await apiDistribuir(payload);
 
-      setMsg("✅ Distribuição confirmada.");
+      setMsg(gpsOk ? "✅ Distribuição confirmada." : "✅ Distribuição confirmada (sem GPS — auditável).");
       onConfirmSuccess?.();
     } catch (e) {
       setMsg(e?.message ?? String(e));
@@ -299,7 +299,6 @@ function SubresponsavelPicker({
             if (options.length) setOpen(true);
           }}
           onBlur={() => {
-            // evita fechar no mesmo tick (android + input + lista)
             if (blurCloseRef.current) clearTimeout(blurCloseRef.current);
             blurCloseRef.current = setTimeout(() => setOpen(false), 180);
           }}
@@ -325,7 +324,7 @@ function SubresponsavelPicker({
           >
             {options.map((opt) => (
               <div
-                key={opt.id} // ✅ key estável
+                key={opt.id}
                 onMouseDown={(e) => e.preventDefault()}
                 onClick={() => handlePick(opt)}
                 style={{
@@ -348,7 +347,9 @@ function SubresponsavelPicker({
 
         <div style={{ marginTop: 6, fontSize: 12, opacity: 0.8 }}>
           {loading ? "Buscando..." : null}
-          {msg ? <span style={{ marginLeft: 8, color: msg.startsWith("✅") ? "#0b7a38" : "#b00020" }}>{msg}</span> : null}
+          {msg ? (
+            <span style={{ marginLeft: 8, color: msg.startsWith("✅") ? "#0b7a38" : "#b00020" }}>{msg}</span>
+          ) : null}
         </div>
       </div>
 
@@ -367,7 +368,11 @@ function SubresponsavelPicker({
           height: 38,
           whiteSpace: "nowrap",
         }}
-        title={!isGpsValid(geo) ? "GPS inválido — backend não aceita distribuição sem localização" : "Confirmar distribuição (PIN 6 dígitos)"}
+        title={
+          isGpsValid(geo)
+            ? "Confirmar distribuição (PIN 6 dígitos)"
+            : "Confirmar distribuição (PIN 6 dígitos) — GPS indisponível ficará auditável"
+        }
       >
         {confirming ? "Confirmando..." : "Confirmar"}
       </button>
@@ -379,9 +384,18 @@ function SubresponsavelPicker({
  * =========================================================
  * App
  * =========================================================
+ *
+ * ✅ ALTERAÇÃO CRÍTICA (MODO BASE / ALMOXARIFADO):
+ * - CHECKLIST NÃO EXIGE GPS
+ * - CAN_SUBMIT NÃO BLOQUEIA POR GPS
+ * - SUBMITCHECKLIST NÃO BARRA GPS 0,0
+ * - GPS continua "best-effort" (informativo/auditável), mas nunca trava operação
  */
 export default function App() {
   const apiBase = import.meta.env.VITE_API_URL;
+
+  // ✅ MODO BASE: não depende de GPS
+  const GPS_REQUIRED_FOR_CHECKLIST = false;
 
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState("");
@@ -404,6 +418,7 @@ export default function App() {
     longitude: 0,
     accuracy_m: 0,
     gps_timestamp: null,
+    last_error: null,
   });
 
   const [submitting, setSubmitting] = useState(false);
@@ -449,25 +464,60 @@ export default function App() {
   }, []);
 
   /**
-   * GPS
-   * - se não for secure context, NÃO tenta (evita spam e instabilidade)
+   * =========================================================
+   * GPS (best-effort / informativo)
+   * =========================================================
    */
-  useEffect(() => {
+  function requestGps(timeoutMs = 15000) {
     if (!("geolocation" in navigator)) {
-      setGeo((g) => ({ ...g, ok: false }));
+      setGeo((g) => ({ ...g, ok: false, last_error: "Geolocation não suportado" }));
       return;
     }
 
-    if (!window.isSecureContext) {
-      // Chrome em http LAN bloqueia e solta erro 1
-      setGeo((g) => ({ ...g, ok: false }));
+    navigator.geolocation.getCurrentPosition(
+      (pos) => {
+        const lat = pos.coords.latitude ?? 0;
+        const lng = pos.coords.longitude ?? 0;
+        const acc = pos.coords.accuracy ?? 0;
+
+        setGeo({
+          ok: true,
+          latitude: lat,
+          longitude: lng,
+          accuracy_m: acc,
+          gps_timestamp: new Date().toISOString(),
+          last_error: null,
+        });
+      },
+      (e) => {
+        console.warn("GPS error:", e);
+        setGeo((g) => ({
+          ...g,
+          ok: false,
+          last_error: `${e?.code ?? "?"} ${e?.message ?? "Erro GPS"}`,
+        }));
+      },
+      { enableHighAccuracy: true, timeout: timeoutMs, maximumAge: 0 }
+    );
+  }
+
+  useEffect(() => {
+    if (!("geolocation" in navigator)) {
+      setGeo((g) => ({ ...g, ok: false, last_error: "Geolocation não suportado" }));
       return;
     }
 
     let cancelled = false;
+    let watchId = null;
 
-    const run = () => {
-      navigator.geolocation.getCurrentPosition(
+    // tenta pegar (se o browser permitir)
+    requestGps(12000);
+
+    const t1 = setTimeout(() => !cancelled && requestGps(20000), 4000);
+    const t2 = setTimeout(() => !cancelled && requestGps(30000), 12000);
+
+    try {
+      watchId = navigator.geolocation.watchPosition(
         (pos) => {
           if (cancelled) return;
           const lat = pos.coords.latitude ?? 0;
@@ -480,24 +530,35 @@ export default function App() {
             longitude: lng,
             accuracy_m: acc,
             gps_timestamp: new Date().toISOString(),
+            last_error: null,
           });
         },
         (e) => {
           if (cancelled) return;
-          console.warn("GPS error:", e);
-          setGeo((g) => ({ ...g, ok: false }));
+          console.warn("GPS watch error:", e);
+          setGeo((g) => ({
+            ...g,
+            ok: false,
+            last_error: `${e?.code ?? "?"} ${e?.message ?? "Erro GPS"}`,
+          }));
         },
-        { enableHighAccuracy: true, timeout: 12000, maximumAge: 0 }
+        { enableHighAccuracy: true, maximumAge: 0, timeout: 25000 }
       );
-    };
-
-    run();
-    const t = setTimeout(run, 4000); // retry leve
+    } catch {
+      // browsers podem bloquear (IP sem https), e tá tudo bem — MODO BASE
+    }
 
     return () => {
       cancelled = true;
-      clearTimeout(t);
+      clearTimeout(t1);
+      clearTimeout(t2);
+      if (watchId != null) {
+        try {
+          navigator.geolocation.clearWatch(watchId);
+        } catch {}
+      }
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   useEffect(() => {
@@ -584,8 +645,11 @@ export default function App() {
       }
     }
 
+    // ✅ MODO BASE: não trava por GPS
+    if (GPS_REQUIRED_FOR_CHECKLIST && !isGpsValid(geo)) return false;
+
     return true;
-  }, [selectedKitId, selectedEncarregadoId, kitItens, totals.pendente, statusMap]);
+  }, [selectedKitId, selectedEncarregadoId, kitItens, totals.pendente, statusMap, geo]);
 
   function setItemStatus(kitItemId, status) {
     setStatusMap((prev) => {
@@ -669,6 +733,12 @@ export default function App() {
     setLastSubmit("");
 
     try {
+      // ✅ MODO BASE: não bloqueia GPS (mas mantém auditável)
+      if (GPS_REQUIRED_FOR_CHECKLIST && !isGpsValid(geo)) {
+        setErr("GPS indisponível (0,0). Para enviar checklist, ative localização e tente novamente.");
+        return;
+      }
+
       const encId = Number(selectedEncarregadoId);
       const kitId = Number(selectedKitId);
 
@@ -687,6 +757,7 @@ export default function App() {
         }
       }
 
+      // mantém lat/lng no payload (0,0 quando bloqueado pelo browser)
       const payload = {
         kit_id: kitId,
         encarregado_id: encId,
@@ -718,7 +789,14 @@ export default function App() {
     );
   }
 
-  const gpsLabel = isGpsValid(geo) ? "GPS ok" : geo.ok ? "GPS inválido" : "GPS indisponível";
+  const gpsValid = isGpsValid(geo);
+  const gpsLabel = gpsValid
+    ? "GPS ok"
+    : geo.last_error?.includes("Only secure origins")
+    ? "GPS bloqueado (IP sem HTTPS) — modo base"
+    : geo.ok
+    ? "GPS inválido"
+    : "GPS indisponível";
 
   const kitOptions = kits.map((k) => ({
     value: String(k.id),
@@ -739,6 +817,23 @@ export default function App() {
 
       <div style={{ opacity: 0.8, marginBottom: 12, fontSize: 13 }}>
         API: <code>{apiBase}</code> • {gpsLabel} • {nowISO()}
+        <button
+          onClick={() => requestGps(20000)}
+          style={{
+            marginLeft: 10,
+            padding: "4px 8px",
+            border: "1px solid #111",
+            borderRadius: 8,
+            cursor: "pointer",
+            fontSize: 12,
+          }}
+          title="Forçar atualização do GPS (se o navegador permitir)"
+        >
+          Atualizar GPS
+        </button>
+        {!gpsValid && geo.last_error ? (
+          <span style={{ marginLeft: 10, fontSize: 12, color: "#b36b00" }}>⚠️ {geo.last_error}</span>
+        ) : null}
       </div>
 
       {err ? (
@@ -805,8 +900,8 @@ export default function App() {
       {/* Ações */}
       <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "center", marginBottom: 12 }}>
         <div style={{ padding: "8px 12px", border: "1px solid #ddd", borderRadius: 10 }}>
-          Total: <b>{totals.total}</b> • Presente: <b>{totals.presente}</b> • Distribuído: <b>{totals.distribuido}</b> • Pendente:{" "}
-          <b>{totals.pendente}</b>
+          Total: <b>{totals.total}</b> • Presente: <b>{totals.presente}</b> • Distribuído: <b>{totals.distribuido}</b> •
+          Pendente: <b>{totals.pendente}</b>
         </div>
 
         <button
@@ -837,6 +932,8 @@ export default function App() {
           title={
             canSubmit
               ? "Enviar checklist"
+              : GPS_REQUIRED_FOR_CHECKLIST && !gpsValid
+              ? "Checklist exige GPS válido (modo atual)"
               : "Checklist só envia com kit completo (sem pendente). Distribuído exige seleção + confirmação (PIN 6 dígitos)."
           }
         >
@@ -874,7 +971,7 @@ export default function App() {
 
               return (
                 <div
-                  key={x.kit_item_id} // ✅ key estável
+                  key={x.kit_item_id}
                   style={{
                     padding: 12,
                     borderTop: "1px solid #eee",
@@ -933,7 +1030,7 @@ export default function App() {
                         borderRadius: 10,
                         minWidth: 100,
                       }}
-                      title={!isGpsValid(geo) ? "Backend não aceita distribuir com GPS inválido" : "Marcar como distribuído"}
+                      title="Marcar como distribuído"
                     >
                       Distribuído
                     </button>
@@ -991,7 +1088,7 @@ export default function App() {
       <div style={{ marginTop: 14, fontSize: 12, opacity: 0.75 }}>
         Regra: checklist só envia com <b>kit completo</b> (sem pendente). Distribuído exige seleção + confirmação (PIN 6 dígitos).
         <br />
-        Nota: backend <b>não aceita</b> distribuição com GPS inválido (0,0).
+        Nota: distribuição <b>aceita</b> GPS 0,0 e fica auditável. Checklist em <b>modo base</b> não trava por GPS.
       </div>
     </div>
   );
