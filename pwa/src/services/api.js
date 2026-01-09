@@ -1,4 +1,5 @@
 const BASE = import.meta.env.VITE_API_URL;
+const TOKEN_KEY = "pwa_auth_token";
 
 function norm(path) {
   if (!path.startsWith("/")) path = `/${path}`;
@@ -7,25 +8,61 @@ function norm(path) {
   return path;
 }
 
-export async function apiGet(path) {
+export function getStoredToken() {
+  return localStorage.getItem(TOKEN_KEY);
+}
+
+export function setStoredToken(token) {
+  localStorage.setItem(TOKEN_KEY, token);
+}
+
+export function clearStoredToken() {
+  localStorage.removeItem(TOKEN_KEY);
+}
+
+function buildHeaders({ auth } = {}) {
+  const headers = { "Content-Type": "application/json" };
+  if (auth) {
+    const token = getStoredToken();
+    if (token) headers.Authorization = `Bearer ${token}`;
+  }
+  return headers;
+}
+
+async function apiRequest(path, { method = "GET", body, auth = true } = {}) {
   const p = norm(path);
-  const res = await fetch(`${BASE}${p}`);
-  if (!res.ok) throw new Error(`GET ${p} -> ${res.status}`);
+  const res = await fetch(`${BASE}${p}`, {
+    method,
+    headers: buildHeaders({ auth }),
+    body: body ? JSON.stringify(body) : undefined,
+  });
+
+  if (!res.ok) {
+    const t = await res.text().catch(() => "");
+    throw new Error(`${method} ${p} -> ${res.status} ${t}`.trim());
+  }
+
+  if (res.status === 204) return null;
   return res.json();
 }
 
-export async function apiPost(path, body) {
-  const p = norm(path);
-  const res = await fetch(`${BASE}${p}`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(body),
-  });
-  if (!res.ok) {
-    const t = await res.text().catch(() => "");
-    throw new Error(`POST ${p} -> ${res.status} ${t}`);
-  }
-  return res.json();
+export async function apiGet(path, options) {
+  return apiRequest(path, { ...options, method: "GET" });
+}
+
+export async function apiPost(path, body, options) {
+  return apiRequest(path, { ...options, method: "POST", body });
+}
+
+// ===============================
+// AUTH
+// ===============================
+export async function login(payload) {
+  return apiPost("/auth/login", payload, { auth: false });
+}
+
+export async function fetchMe() {
+  return apiGet("/me");
 }
 
 // ===============================
