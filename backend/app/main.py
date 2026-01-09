@@ -1,12 +1,22 @@
+# backend/app/main.py
+import os
 from typing import List, Optional
+
+from dotenv import load_dotenv
+
+# Carrega .env antes de qualquer coisa que dependa de env (JWT / DB / etc.)
+load_dotenv()
 
 from fastapi import FastAPI, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session
 
-from backend.app.database import SessionLocal, Base, engine
-from backend.app import models, schemas
-from backend.app.routers import subresponsaveis, movimentos
+# ✅ IMPORTS CERTOS (sem "backend.app...")
+from .database import SessionLocal, Base, engine
+from . import models, schemas
+from .routers import subresponsaveis, movimentos, auth, termos
+from .core.auth import get_current_token, require_roles
+from .core import security
 
 # ======================================================
 # APP
@@ -17,6 +27,27 @@ app = FastAPI(
 )
 
 # ======================================================
+# DEBUG JWT (pra matar "Invalid token" sem adivinhação)
+# ======================================================
+@app.get("/debug/jwt")
+def debug_jwt():
+    s = os.getenv("JWT_SECRET") or ""
+    return {"env_len": len(s), "env_head": s[:6]}
+
+
+@app.get("/debug/jwt2")
+def debug_jwt2():
+    s_env = os.getenv("JWT_SECRET") or ""
+    s_mod = getattr(security, "JWT_SECRET", "") or ""
+    return {
+        "env_len": len(s_env),
+        "env_head": s_env[:6],
+        "mod_len": len(s_mod),
+        "mod_head": s_mod[:6],
+        "eq": s_env == s_mod,
+    }
+
+# ======================================================
 # CORS – LIBERADO PARA REDE (DEV INTERNO)
 # ======================================================
 app.add_middleware(
@@ -24,9 +55,16 @@ app.add_middleware(
     allow_origins=[
         "http://localhost:5173",
         "http://127.0.0.1:5173",
-        "http://192.168.0.130:5173",  # seu IP atual
-        # se mudar de rede, ajuste aqui
+        "http://localhost:5174",
+        "http://127.0.0.1:5174",
+        "http://localhost:3000",
+        "http://127.0.0.1:3000",
+        # Se quiser travar em IP específico, pode deixar só os seus aqui
+        "http://192.168.0.130:5173",
+        "http://192.168.0.154:5173",
     ],
+    # ✅ libera qualquer host local/lan em DEV (evita ficar editando IP toda hora)
+    allow_origin_regex=r"^http://(localhost|127\.0\.0\.1|192\.168\.\d{1,3}\.\d{1,3})(:\d+)?$",
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -37,6 +75,7 @@ app.add_middleware(
 # ======================================================
 Base.metadata.create_all(bind=engine)
 
+
 def get_db():
     db = SessionLocal()
     try:
@@ -45,8 +84,11 @@ def get_db():
         db.close()
 
 # ======================================================
-# ROUTERS (NOVOS)
+# ROUTERS
 # ======================================================
+# auth + termos (MariaDB direto) e o resto (SQLAlchemy / MySQL)
+app.include_router(auth.router, tags=["Auth"])
+app.include_router(termos.router, tags=["Termos"])
 app.include_router(subresponsaveis.router, tags=["Subresponsáveis"])
 app.include_router(movimentos.router, tags=["Movimentos"])
 
@@ -61,9 +103,20 @@ def healthcheck():
     }
 
 # ======================================================
+# ME (token check)
+# ======================================================
+@app.get("/me")
+def me(payload: dict = Depends(get_current_token)):
+    return {"user": payload.get("sub"), "role": payload.get("role")}
+
+# ======================================================
 # ITENS
 # ======================================================
-@app.post("/itens/", response_model=schemas.Item)
+@app.post(
+    "/itens/",
+    response_model=schemas.Item,
+    dependencies=[Depends(require_roles(["admin", "manutencao"]))],
+)
 def criar_item(payload: schemas.ItemCreate, db: Session = Depends(get_db)):
     item = models.Item(
         patrimonio=payload.patrimonio,
@@ -74,6 +127,7 @@ def criar_item(payload: schemas.ItemCreate, db: Session = Depends(get_db)):
     db.refresh(item)
     return item
 
+
 @app.get("/itens/", response_model=List[schemas.Item])
 def listar_itens(db: Session = Depends(get_db)):
     return db.query(models.Item).all()
@@ -81,13 +135,18 @@ def listar_itens(db: Session = Depends(get_db)):
 # ======================================================
 # SETORES
 # ======================================================
-@app.post("/setores/", response_model=schemas.Setor)
+@app.post(
+    "/setores/",
+    response_model=schemas.Setor,
+    dependencies=[Depends(require_roles(["admin", "manutencao"]))],
+)
 def criar_setor(payload: schemas.SetorCreate, db: Session = Depends(get_db)):
     setor = models.Setor(nome=payload.nome)
     db.add(setor)
     db.commit()
     db.refresh(setor)
     return setor
+
 
 @app.get("/setores/", response_model=List[schemas.Setor])
 def listar_setores(db: Session = Depends(get_db)):
@@ -96,7 +155,11 @@ def listar_setores(db: Session = Depends(get_db)):
 # ======================================================
 # ENCARREGADOS
 # ======================================================
-@app.post("/encarregados/", response_model=schemas.Encarregado)
+@app.post(
+    "/encarregados/",
+    response_model=schemas.Encarregado,
+    dependencies=[Depends(require_roles(["admin", "manutencao"]))],
+)
 def criar_encarregado(payload: schemas.EncarregadoCreate, db: Session = Depends(get_db)):
     enc = models.Encarregado(
         setor_id=payload.setor_id,
@@ -108,6 +171,7 @@ def criar_encarregado(payload: schemas.EncarregadoCreate, db: Session = Depends(
     db.commit()
     db.refresh(enc)
     return enc
+
 
 @app.get("/encarregados/", response_model=List[schemas.Encarregado])
 def listar_encarregados(
@@ -122,7 +186,11 @@ def listar_encarregados(
 # ======================================================
 # KITS
 # ======================================================
-@app.post("/kits/", response_model=schemas.Kit)
+@app.post(
+    "/kits/",
+    response_model=schemas.Kit,
+    dependencies=[Depends(require_roles(["admin", "manutencao"]))],
+)
 def criar_kit(payload: schemas.KitCreate, db: Session = Depends(get_db)):
     kit = models.Kit(
         nome=payload.nome,
@@ -133,6 +201,7 @@ def criar_kit(payload: schemas.KitCreate, db: Session = Depends(get_db)):
     db.commit()
     db.refresh(kit)
     return kit
+
 
 @app.get("/kits/", response_model=List[schemas.Kit])
 def listar_kits(
@@ -147,7 +216,11 @@ def listar_kits(
 # ======================================================
 # KIT x ITENS
 # ======================================================
-@app.post("/kits/itens/", response_model=schemas.KitItem)
+@app.post(
+    "/kits/itens/",
+    response_model=schemas.KitItem,
+    dependencies=[Depends(require_roles(["admin", "manutencao"]))],
+)
 def adicionar_item_kit(payload: schemas.KitItemCreate, db: Session = Depends(get_db)):
     ki = models.KitItem(
         kit_id=payload.kit_id,
@@ -158,6 +231,7 @@ def adicionar_item_kit(payload: schemas.KitItemCreate, db: Session = Depends(get
     db.commit()
     db.refresh(ki)
     return ki
+
 
 @app.get("/kits/{kit_id}/itens/", response_model=List[schemas.KitItem])
 def listar_itens_kit(kit_id: int, db: Session = Depends(get_db)):
@@ -201,7 +275,11 @@ def listar_itens_kit_detalhados(kit_id: int, db: Session = Depends(get_db)):
 # ======================================================
 # CHECKLIST SEMANAL
 # ======================================================
-@app.post("/checklists-semanais/", response_model=schemas.ChecklistSemanal)
+@app.post(
+    "/checklists-semanais/",
+    response_model=schemas.ChecklistSemanal,
+    dependencies=[Depends(require_roles(["admin", "manutencao", "funcionario"]))],
+)
 def criar_checklist(payload: schemas.ChecklistSemanalCreate, db: Session = Depends(get_db)):
     chk = models.ChecklistSemanal(
         kit_id=payload.kit_id,
@@ -214,6 +292,7 @@ def criar_checklist(payload: schemas.ChecklistSemanalCreate, db: Session = Depen
     db.commit()
     db.refresh(chk)
     return chk
+
 
 @app.get("/checklists-semanais/", response_model=List[schemas.ChecklistSemanal])
 def listar_checklists(db: Session = Depends(get_db)):
