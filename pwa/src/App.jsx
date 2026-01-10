@@ -7,6 +7,7 @@ import {
   distribuir as apiDistribuir,
   login as apiLogin,
   fetchMe,
+  probeAuthSupport,
   getStoredToken,
   setStoredToken,
   clearStoredToken,
@@ -68,7 +69,7 @@ function isGpsValid(geo) {
  * =========================================================
  */
 
-function LoginScreen({ onAuthSuccess, me, authStatus, onLogout, onRefreshMe }) {
+function LoginScreen({ onAuthSuccess, me, authStatus, onLogout, onRefreshMe, authSupported }) {
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
@@ -77,6 +78,11 @@ function LoginScreen({ onAuthSuccess, me, authStatus, onLogout, onRefreshMe }) {
   async function handleSubmit(e) {
     e.preventDefault();
     setMsg("");
+
+    if (!authSupported) {
+      setMsg("Autenticação indisponível neste backend.");
+      return;
+    }
 
     if (!username || !password) {
       setMsg("Preencha usuário e senha.");
@@ -102,7 +108,10 @@ function LoginScreen({ onAuthSuccess, me, authStatus, onLogout, onRefreshMe }) {
   return (
     <div style={{ maxWidth: 520 }}>
       <h3 style={{ marginBottom: 8 }}>Login</h3>
-      <p style={{ marginTop: 0, opacity: 0.75 }}>Fluxo usando /auth/login e validação em /me.</p>
+      <p style={{ marginTop: 0, opacity: 0.75 }}>
+        Fluxo usando /auth/login e validação em /me.
+        {!authSupported ? " (Indisponível neste backend)" : ""}
+      </p>
 
       {me ? (
         <div style={{ border: "1px solid #c6f3d2", background: "#ecfff2", padding: 12, borderRadius: 12 }}>
@@ -119,6 +128,7 @@ function LoginScreen({ onAuthSuccess, me, authStatus, onLogout, onRefreshMe }) {
               placeholder="ex: usuario"
               style={{ padding: 10 }}
               autoComplete="username"
+              disabled={!authSupported}
             />
           </label>
 
@@ -131,12 +141,13 @@ function LoginScreen({ onAuthSuccess, me, authStatus, onLogout, onRefreshMe }) {
               placeholder="••••••••"
               style={{ padding: 10 }}
               autoComplete="current-password"
+              disabled={!authSupported}
             />
           </label>
 
           <button
             type="submit"
-            disabled={loading}
+            disabled={loading || !authSupported}
             style={{
               padding: "10px 12px",
               borderRadius: 10,
@@ -1280,8 +1291,10 @@ export default function App() {
   const [me, setMe] = useState(null);
   const [authStatus, setAuthStatus] = useState("idle");
   const [authError, setAuthError] = useState("");
+  const [authSupported, setAuthSupported] = useState(null);
 
-  const isAuthenticated = Boolean(me);
+  const authEnabled = authSupported !== false;
+  const isAuthenticated = authEnabled ? Boolean(me) : true;
 
   async function validateMe() {
     if (!authToken) return;
@@ -1302,19 +1315,43 @@ export default function App() {
   }
 
   useEffect(() => {
+    (async () => {
+      try {
+        const supported = await probeAuthSupport();
+        setAuthSupported(supported);
+        if (!supported) {
+          clearStoredToken();
+          setAuthToken(null);
+          setMe(null);
+          setAuthError("");
+        }
+      } catch (e) {
+        console.warn("auth probe failed:", e);
+        setAuthSupported(true);
+      }
+    })();
+  }, []);
+
+  useEffect(() => {
+    if (!authEnabled) {
+      setMe(null);
+      setAuthStatus("ready");
+      return;
+    }
+
     if (authToken) {
       validateMe();
     } else {
       setMe(null);
       setAuthStatus("ready");
     }
-  }, [authToken]);
+  }, [authToken, authEnabled]);
 
   useEffect(() => {
-    if (!authToken) {
+    if (!authToken && authEnabled) {
       setTab("login");
     }
-  }, [authToken]);
+  }, [authToken, authEnabled]);
 
   async function handleAuthSuccess(token) {
     setStoredToken(token);
@@ -1343,7 +1380,7 @@ export default function App() {
           {[
             { id: "checklist", label: "Checklist semanal" },
             { id: "termos", label: "Termos" },
-            { id: "login", label: isAuthenticated ? "Conta" : "Login" },
+            { id: "login", label: authEnabled ? (isAuthenticated ? "Conta" : "Login") : "Login (indisponível)" },
           ].map((item) => (
             <button
               key={item.id}
@@ -1370,6 +1407,12 @@ export default function App() {
         </div>
       ) : null}
 
+      {authSupported === false ? (
+        <div style={{ marginTop: 12, background: "#eef6ff", border: "1px solid #a8c5f0", padding: 10, borderRadius: 10 }}>
+          <b>Info:</b> Backend sem endpoints de autenticação. Login desativado e acesso liberado.
+        </div>
+      ) : null}
+
       <main style={{ marginTop: 20 }}>
         {tab === "login" ? (
           <LoginScreen
@@ -1378,6 +1421,7 @@ export default function App() {
             authStatus={authStatus}
             onLogout={handleLogout}
             onRefreshMe={validateMe}
+            authSupported={authEnabled}
           />
         ) : null}
 

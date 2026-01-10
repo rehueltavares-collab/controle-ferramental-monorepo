@@ -65,6 +65,17 @@ export async function fetchMe() {
   return apiGet("/me");
 }
 
+export async function probeAuthSupport() {
+  const p = norm("/me");
+  const res = await fetch(`${BASE}${p}`, {
+    method: "GET",
+    headers: buildHeaders({ auth: false }),
+  });
+
+  if (res.status === 404) return false;
+  return true;
+}
+
 // ===============================
 // SUBRESPONSÁVEIS
 // ===============================
