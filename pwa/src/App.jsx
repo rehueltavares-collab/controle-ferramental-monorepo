@@ -5,7 +5,12 @@ import {
   apiPost,
   searchSubresponsaveis,
   distribuir as apiDistribuir,
-  recolher as apiRecolher,
+  login as apiLogin,
+  fetchMe,
+  probeAuthSupport,
+  getStoredToken,
+  setStoredToken,
+  clearStoredToken,
 } from "./services/api";
 
 /**
@@ -60,15 +65,298 @@ function isGpsValid(geo) {
 
 /**
  * =========================================================
- * Subresponsável Autocomplete (com confirmação via PIN)
+ * Login Screen
  * =========================================================
- *
- * Fluxo:
- * 1) Usuário digita -> busca no backend (debounce)
- * 2) Usuário clica em uma opção -> preenche campo e guarda subresponsavel_id
- * 3) Usuário clica "Confirmar" -> pede PIN (prompt), chama /movimentos/distribuir
- *
- * Observação: confirmamos distribuição no backend (movimentos).
+ */
+
+function LoginScreen({ onAuthSuccess, me, authStatus, onLogout, onRefreshMe, authSupported }) {
+  const [username, setUsername] = useState("");
+  const [password, setPassword] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [msg, setMsg] = useState("");
+
+  async function handleSubmit(e) {
+    e.preventDefault();
+    setMsg("");
+
+    if (!authSupported) {
+      setMsg("Autenticação indisponível neste backend.");
+      return;
+    }
+
+    if (!username || !password) {
+      setMsg("Preencha usuário e senha.");
+      return;
+    }
+
+    setLoading(true);
+    try {
+      const res = await apiLogin({ username, password });
+      const token = res?.access_token ?? res?.token ?? res?.jwt;
+      if (!token) throw new Error("Resposta sem token. Verifique o backend.");
+
+      setMsg("Login ok. Validando /me...");
+      await onAuthSuccess(token);
+      setMsg("✅ Autenticado.");
+    } catch (e2) {
+      setMsg(e2?.message ?? "Falha no login");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  return (
+    <div style={{ maxWidth: 520 }}>
+      <h3 style={{ marginBottom: 8 }}>Login</h3>
+      <p style={{ marginTop: 0, opacity: 0.75 }}>
+        Fluxo usando /auth/login e validação em /me.
+        {!authSupported ? " (Indisponível neste backend)" : ""}
+      </p>
+
+      {me ? (
+        <div style={{ border: "1px solid #c6f3d2", background: "#ecfff2", padding: 12, borderRadius: 12 }}>
+          <div style={{ fontWeight: 700 }}>Conectado:</div>
+          <pre style={{ margin: "8px 0 0", whiteSpace: "pre-wrap" }}>{JSON.stringify(me, null, 2)}</pre>
+        </div>
+      ) : (
+        <form onSubmit={handleSubmit} style={{ display: "grid", gap: 10 }}>
+          <label style={{ display: "grid", gap: 6, fontSize: 13 }}>
+            Usuário
+            <input
+              value={username}
+              onChange={(e) => setUsername(e.target.value)}
+              placeholder="ex: usuario"
+              style={{ padding: 10 }}
+              autoComplete="username"
+              disabled={!authSupported}
+            />
+          </label>
+
+          <label style={{ display: "grid", gap: 6, fontSize: 13 }}>
+            Senha
+            <input
+              type="password"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              placeholder="••••••••"
+              style={{ padding: 10 }}
+              autoComplete="current-password"
+              disabled={!authSupported}
+            />
+          </label>
+
+          <button
+            type="submit"
+            disabled={loading || !authSupported}
+            style={{
+              padding: "10px 12px",
+              borderRadius: 10,
+              fontWeight: 800,
+              border: "1px solid #111",
+              cursor: loading ? "not-allowed" : "pointer",
+            }}
+          >
+            {loading ? "Entrando..." : "Entrar"}
+          </button>
+        </form>
+      )}
+
+      {msg ? (
+        <div style={{ marginTop: 10, fontSize: 13, color: msg.startsWith("✅") ? "#0b7a38" : "#b00020" }}>
+          {msg}
+        </div>
+      ) : null}
+
+      {me ? (
+        <div style={{ display: "flex", gap: 8, marginTop: 12 }}>
+          <button
+            onClick={onRefreshMe}
+            disabled={authStatus === "loading"}
+            style={{
+              padding: "8px 10px",
+              borderRadius: 10,
+              border: "1px solid #111",
+              cursor: authStatus === "loading" ? "not-allowed" : "pointer",
+              fontWeight: 700,
+            }}
+          >
+            {authStatus === "loading" ? "Testando /me..." : "Testar /me"}
+          </button>
+          <button
+            onClick={onLogout}
+            style={{
+              padding: "8px 10px",
+              borderRadius: 10,
+              border: "1px solid #b00020",
+              color: "#b00020",
+              cursor: "pointer",
+              fontWeight: 700,
+            }}
+          >
+            Sair
+          </button>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+/**
+ * =========================================================
+ * Termos Screen
+ * =========================================================
+ */
+
+function TermosScreen({ isAuthenticated }) {
+  const [loading, setLoading] = useState(false);
+  const [err, setErr] = useState("");
+  const [msg, setMsg] = useState("");
+  const [items, setItems] = useState([]);
+  const [texto, setTexto] = useState("");
+  const [titulo, setTitulo] = useState("");
+  const [aceito, setAceito] = useState(true);
+
+  async function loadMyTerms() {
+    setLoading(true);
+    setErr("");
+    try {
+      const res = await apiGet("/termos/minha");
+      setItems(safeArray(res));
+    } catch (e) {
+      setErr(e?.message ?? "Falha ao carregar termos");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  useEffect(() => {
+    if (isAuthenticated) {
+      loadMyTerms();
+    }
+  }, [isAuthenticated]);
+
+  async function handleSubmit(e) {
+    e.preventDefault();
+    setMsg("");
+    setErr("");
+
+    if (!texto.trim()) {
+      setErr("Informe o texto do termo.");
+      return;
+    }
+
+    try {
+      await apiPost("/termos/", {
+        titulo: titulo.trim() || "Termo",
+        texto: texto.trim(),
+        aceito: Boolean(aceito),
+      });
+      setMsg("✅ Termo enviado.");
+      setTexto("");
+      setTitulo("");
+      setAceito(true);
+      await loadMyTerms();
+    } catch (e2) {
+      setErr(e2?.message ?? "Falha ao salvar termo");
+    }
+  }
+
+  return (
+    <div style={{ display: "grid", gap: 16 }}>
+      <div style={{ maxWidth: 640 }}>
+        <h3 style={{ marginBottom: 8 }}>Termos</h3>
+        <p style={{ marginTop: 0, opacity: 0.75 }}>Formulário envia para /termos/ e lista /termos/minha.</p>
+
+        <form onSubmit={handleSubmit} style={{ display: "grid", gap: 10 }}>
+          <label style={{ display: "grid", gap: 6, fontSize: 13 }}>
+            Título
+            <input
+              value={titulo}
+              onChange={(e) => setTitulo(e.target.value)}
+              placeholder="Ex: Termo de responsabilidade"
+              style={{ padding: 10 }}
+            />
+          </label>
+
+          <label style={{ display: "grid", gap: 6, fontSize: 13 }}>
+            Texto do termo
+            <textarea
+              value={texto}
+              onChange={(e) => setTexto(e.target.value)}
+              placeholder="Descreva o termo..."
+              rows={4}
+              style={{ padding: 10, resize: "vertical" }}
+            />
+          </label>
+
+          <label style={{ display: "flex", gap: 8, alignItems: "center", fontSize: 13 }}>
+            <input type="checkbox" checked={aceito} onChange={(e) => setAceito(e.target.checked)} />
+            Estou ciente e aceito
+          </label>
+
+          <button
+            type="submit"
+            style={{
+              padding: "10px 12px",
+              borderRadius: 10,
+              fontWeight: 800,
+              border: "1px solid #111",
+              cursor: "pointer",
+            }}
+          >
+            Enviar Termo
+          </button>
+        </form>
+
+        {msg ? (
+          <div style={{ marginTop: 10, fontSize: 13, color: "#0b7a38" }}>{msg}</div>
+        ) : null}
+        {err ? (
+          <div style={{ marginTop: 10, fontSize: 13, color: "#b00020" }}>{err}</div>
+        ) : null}
+      </div>
+
+      <div>
+        <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}>
+          <h4 style={{ margin: 0 }}>Meus termos</h4>
+          <button
+            onClick={loadMyTerms}
+            disabled={loading}
+            style={{
+              padding: "6px 10px",
+              borderRadius: 10,
+              border: "1px solid #111",
+              cursor: loading ? "not-allowed" : "pointer",
+            }}
+          >
+            {loading ? "Atualizando..." : "Atualizar"}
+          </button>
+        </div>
+
+        {items.length === 0 ? (
+          <div style={{ opacity: 0.7, fontSize: 13 }}>Nenhum termo encontrado.</div>
+        ) : (
+          <div style={{ display: "grid", gap: 10 }}>
+            {items.map((item, idx) => (
+              <div key={item.id ?? idx} style={{ border: "1px solid #ddd", borderRadius: 12, padding: 12 }}>
+                <div style={{ fontWeight: 700, marginBottom: 6 }}>
+                  {item.titulo ?? `Termo ${item.id ?? idx + 1}`}
+                </div>
+                <pre style={{ margin: 0, fontSize: 12, whiteSpace: "pre-wrap" }}>
+                  {JSON.stringify(item, null, 2)}
+                </pre>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+/**
+ * =========================================================
+ * Subresponsável Autocomplete (com confirmação via PIN)
  * =========================================================
  */
 
@@ -309,10 +597,11 @@ function SubresponsavelPicker({
 
 /**
  * =========================================================
- * App
+ * Checklist Semanal Screen
  * =========================================================
  */
-export default function App() {
+
+function ChecklistSemanalScreen() {
   const apiBase = import.meta.env.VITE_API_URL;
 
   /**
@@ -525,11 +814,6 @@ export default function App() {
    * =========================================================
    * Regras de envio do CHECKLIST (kit completo)
    * =========================================================
-   *
-   * - precisa kit e encarregado
-   * - NÃO pode ter pendente (kit completo)
-   * - se DISTRIBUIDO, precisa estar CONFIRMADO (movimentos) e com subresponsavel_id
-   * =========================================================
    */
   const canSubmit = useMemo(() => {
     if (!selectedKitId) return false;
@@ -643,10 +927,6 @@ export default function App() {
   /**
    * =========================================================
    * POST checklist (modelo atual do backend)
-   *
-   * Observação:
-   * - backend hoje salva "patrimonios_declarados" no checklist semanal
-   * - movimentos (distribuir/recolher) ficam na tabela item_movimentos
    * =========================================================
    */
   async function submitChecklist() {
@@ -677,9 +957,13 @@ export default function App() {
       const payload = {
         kit_id: kitId,
         encarregado_id: encId,
-        latitude: Number(geo.latitude ?? 0),
-        longitude: Number(geo.longitude ?? 0),
         patrimonios_declarados: lines.join("\n"),
+        ...(isGpsValid(geo)
+          ? {
+              latitude: Number(geo.latitude ?? 0),
+              longitude: Number(geo.longitude ?? 0),
+            }
+          : {}),
       };
 
       await apiPost("/checklists-semanais/", payload);
@@ -989,9 +1273,178 @@ export default function App() {
 
       <div style={{ marginTop: 14, fontSize: 12, opacity: 0.75 }}>
         Regra: checklist só envia com <b>kit completo</b> (sem pendente). Distribuído exige seleção + confirmação (PIN 6 dígitos).<br />
-        Nota: backend <b>não aceita</b> distribuição com GPS inválido (0,0). Se o GPS do desktop não vier, a próxima evolução é “Obra/Local manual”
-        para auditar sem depender do GPS.
+        Nota: GPS é opcional para checklist semanal, mas a distribuição de itens ainda exige localização válida.
       </div>
+    </div>
+  );
+}
+
+/**
+ * =========================================================
+ * App
+ * =========================================================
+ */
+export default function App() {
+  const apiBase = import.meta.env.VITE_API_URL;
+  const [tab, setTab] = useState("checklist");
+  const [authToken, setAuthToken] = useState(() => getStoredToken());
+  const [me, setMe] = useState(null);
+  const [authStatus, setAuthStatus] = useState("idle");
+  const [authError, setAuthError] = useState("");
+  const [authSupported, setAuthSupported] = useState(null);
+
+  const authEnabled = authSupported !== false;
+  const isAuthenticated = authEnabled ? Boolean(me) : true;
+
+  async function validateMe() {
+    if (!authToken) return;
+    setAuthStatus("loading");
+    setAuthError("");
+    try {
+      const res = await fetchMe();
+      setMe(res);
+      setAuthStatus("ready");
+    } catch (e) {
+      console.error("/me failed:", e);
+      setAuthError(e?.message ?? "Falha ao validar /me");
+      clearStoredToken();
+      setAuthToken(null);
+      setMe(null);
+      setAuthStatus("ready");
+    }
+  }
+
+  useEffect(() => {
+    (async () => {
+      try {
+        const supported = await probeAuthSupport();
+        setAuthSupported(supported);
+        if (!supported) {
+          clearStoredToken();
+          setAuthToken(null);
+          setMe(null);
+          setAuthError("");
+        }
+      } catch (e) {
+        console.warn("auth probe failed:", e);
+        setAuthSupported(true);
+      }
+    })();
+  }, []);
+
+  useEffect(() => {
+    if (!authEnabled) {
+      setMe(null);
+      setAuthStatus("ready");
+      return;
+    }
+
+    if (authToken) {
+      validateMe();
+    } else {
+      setMe(null);
+      setAuthStatus("ready");
+    }
+  }, [authToken, authEnabled]);
+
+  useEffect(() => {
+    if (!authToken && authEnabled) {
+      setTab("login");
+    }
+  }, [authToken, authEnabled]);
+
+  async function handleAuthSuccess(token) {
+    setStoredToken(token);
+    setAuthToken(token);
+    await validateMe();
+  }
+
+  function handleLogout() {
+    clearStoredToken();
+    setAuthToken(null);
+    setMe(null);
+    setTab("login");
+  }
+
+  return (
+    <div style={{ padding: 16, fontFamily: "system-ui", maxWidth: 1200, margin: "0 auto" }}>
+      <header style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
+        <div>
+          <h2 style={{ margin: 0 }}>Ferramental • PWA</h2>
+          <div style={{ fontSize: 12, opacity: 0.7 }}>
+            API: <code>{apiBase}</code>
+          </div>
+        </div>
+
+        <nav style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+          {[
+            { id: "checklist", label: "Checklist semanal" },
+            { id: "termos", label: "Termos" },
+            { id: "login", label: authEnabled ? (isAuthenticated ? "Conta" : "Login") : "Login (indisponível)" },
+          ].map((item) => (
+            <button
+              key={item.id}
+              onClick={() => setTab(item.id)}
+              style={{
+                padding: "8px 12px",
+                borderRadius: 999,
+                border: tab === item.id ? "2px solid #111" : "1px solid #ccc",
+                fontWeight: tab === item.id ? 800 : 600,
+                cursor: "pointer",
+                background: tab === item.id ? "#111" : "#fff",
+                color: tab === item.id ? "#fff" : "#111",
+              }}
+            >
+              {item.label}
+            </button>
+          ))}
+        </nav>
+      </header>
+
+      {authError ? (
+        <div style={{ marginTop: 12, background: "#fff4e5", border: "1px solid #f0c674", padding: 10, borderRadius: 10 }}>
+          <b>Atenção:</b> {authError}
+        </div>
+      ) : null}
+
+      {authSupported === false ? (
+        <div style={{ marginTop: 12, background: "#eef6ff", border: "1px solid #a8c5f0", padding: 10, borderRadius: 10 }}>
+          <b>Info:</b> Backend sem endpoints de autenticação. Login desativado e acesso liberado.
+        </div>
+      ) : null}
+
+      <main style={{ marginTop: 20 }}>
+        {tab === "login" ? (
+          <LoginScreen
+            onAuthSuccess={handleAuthSuccess}
+            me={me}
+            authStatus={authStatus}
+            onLogout={handleLogout}
+            onRefreshMe={validateMe}
+            authSupported={authEnabled}
+          />
+        ) : null}
+
+        {tab === "termos" ? (
+          isAuthenticated ? (
+            <TermosScreen isAuthenticated={isAuthenticated} />
+          ) : (
+            <div style={{ padding: 16, border: "1px dashed #ccc", borderRadius: 12 }}>
+              Faça login para visualizar os termos.
+            </div>
+          )
+        ) : null}
+
+        {tab === "checklist" ? (
+          isAuthenticated ? (
+            <ChecklistSemanalScreen />
+          ) : (
+            <div style={{ padding: 16, border: "1px dashed #ccc", borderRadius: 12 }}>
+              Faça login para acessar o checklist semanal.
+            </div>
+          )
+        ) : null}
+      </main>
     </div>
   );
 }
