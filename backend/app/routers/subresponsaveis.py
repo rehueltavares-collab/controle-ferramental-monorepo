@@ -1,13 +1,15 @@
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 from typing import Optional, List
-import sqlite3
 
-from ..utils.security import hash_pin
+from sqlalchemy import text
+from sqlalchemy.orm import Session
 
-DB_PATH = "ferramental.db"
+from ..database import SessionLocal
+
 
 router = APIRouter(prefix="/subresponsaveis", tags=["subresponsaveis"])
+
 
 class SubresponsavelOut(BaseModel):
     id: int
@@ -15,58 +17,68 @@ class SubresponsavelOut(BaseModel):
     secao: Optional[str] = None
     ativo: int
 
+
 class DefinirPinIn(BaseModel):
     pin: str
 
+
+def get_db():
+    db = SessionLocal()
+    try:
+        yield db
+    finally:
+        db.close()
+
+
 @router.get("", response_model=List[SubresponsavelOut])
-def listar(query: str = Query(default="", description="busca por nome")):
-    con = sqlite3.connect(DB_PATH)
-    con.row_factory = sqlite3.Row
-    cur = con.cursor()
-
-    q = query.strip().upper()
+def listar(query: str = Query(default="", description="busca por nome"), db: Session = Depends(get_db)):
+    q = query.strip()
     if q:
-        cur.execute(
-            """
-            SELECT id, nome, secao, ativo
-            FROM subresponsaveis
-            WHERE ativo=1 AND nome LIKE ?
-            ORDER BY nome
-            LIMIT 50
-            """,
-            (f"%{q}%",),
-        )
+        rows = db.execute(
+            text(
+                """
+                SELECT id, nome, secao, ativo
+                FROM subresponsaveis
+                WHERE ativo=1 AND nome LIKE :q
+                ORDER BY nome
+                LIMIT 50
+                """
+            ),
+            {"q": f"%{q}%"},
+        ).mappings().all()
     else:
-        cur.execute(
-            """
-            SELECT id, nome, secao, ativo
-            FROM subresponsaveis
-            WHERE ativo=1
-            ORDER BY nome
-            LIMIT 50
-            """
-        )
+        rows = db.execute(
+            text(
+                """
+                SELECT id, nome, secao, ativo
+                FROM subresponsaveis
+                WHERE ativo=1
+                ORDER BY nome
+                LIMIT 50
+                """
+            )
+        ).mappings().all()
 
-    rows = [dict(r) for r in cur.fetchall()]
-    con.close()
-    return rows
+    return [SubresponsavelOut(**r) for r in rows]
+
 
 @router.post("/{sub_id}/definir-pin")
-def definir_pin(sub_id: int, body: DefinirPinIn):
+def definir_pin(sub_id: int, body: DefinirPinIn, db: Session = Depends(get_db)):
     pin = body.pin.strip()
     if not pin.isdigit() or len(pin) != 6:
-        raise HTTPException(status_code=400, detail="PIN deve ter 6 dígitos numéricos")
+        raise HTTPException(status_code=400, detail="PIN deve ter 6 digitos numericos")
 
-    con = sqlite3.connect(DB_PATH)
-    cur = con.cursor()
+    row = db.execute(
+        text("SELECT id FROM subresponsaveis WHERE id=:id"),
+        {"id": sub_id},
+    ).first()
+    if not row:
+        raise HTTPException(status_code=404, detail="Subresponsavel nao encontrado")
 
-    cur.execute("SELECT id FROM subresponsaveis WHERE id=?", (sub_id,))
-    if not cur.fetchone():
-        con.close()
-        raise HTTPException(status_code=404, detail="Subresponsável não encontrado")
-
-    cur.execute("UPDATE subresponsaveis SET pin_hash=? WHERE id=?", (hash_pin(pin), sub_id))
-    con.commit()
-    con.close()
+    db.execute(
+        text("UPDATE subresponsaveis SET pin=:pin WHERE id=:id"),
+        {"pin": pin, "id": sub_id},
+    )
+    db.commit()
 
     return {"ok": True}

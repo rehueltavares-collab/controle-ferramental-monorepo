@@ -1,16 +1,29 @@
-from pathlib import Path
+from __future__ import annotations
+
+import os
 from sqlalchemy import create_engine
+from sqlalchemy.engine import URL
 from sqlalchemy.orm import sessionmaker, declarative_base
 
-# pega a raiz do projeto: .../controle-ferramental-limpo
-BASE_DIR = Path(__file__).resolve().parents[2]
-DB_PATH = BASE_DIR / "ferramental.db"
+DB_DRIVER = os.getenv("DB_DRIVER", "mysql+pymysql")
+DB_HOST = os.getenv("DB_HOST", "localhost")
+DB_PORT = os.getenv("DB_PORT", "3306")
+DB_NAME = os.getenv("DB_NAME", "ferramental")
+DB_USER = os.getenv("DB_USER", "root")
+DB_PASSWORD = os.getenv("DB_PASSWORD", "")
 
-DATABASE_URL = f"sqlite:///{DB_PATH.as_posix()}"
+DATABASE_URL = URL.create(
+    drivername=DB_DRIVER,
+    username=DB_USER,
+    password=DB_PASSWORD,
+    host=DB_HOST,
+    port=int(DB_PORT) if DB_PORT else None,
+    database=DB_NAME,
+)
 
 engine = create_engine(
     DATABASE_URL,
-    connect_args={"check_same_thread": False},
+    pool_pre_ping=True,
 )
 
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)

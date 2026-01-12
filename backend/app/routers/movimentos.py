@@ -1,93 +1,30 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
-from pathlib import Path
-import sqlite3
 from typing import Optional
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
+from sqlalchemy import text
+from sqlalchemy.orm import Session
 
-# Usa as funções de segurança que você já tem
-# (hash_pin / verify_pin). Se seu utils/security.py não tiver verify_pin,
-# eu já tratei isso com fallback (mensagem clara).
-try:
-    from ..utils.security import verify_pin  # type: ignore
-except Exception:  # pragma: no cover
-    verify_pin = None  # fallback tratado abaixo
+from ..database import SessionLocal
 
 
 router = APIRouter(prefix="/movimentos", tags=["movimentos"])
 
 
-# =========================
-# DB helpers
-# =========================
-
-def _db_path() -> Path:
-    # .../backend/app/routers/movimentos.py -> project root é parents[3]
-    return Path(__file__).resolve().parents[3] / "ferramental.db"
-
-
-def _connect() -> sqlite3.Connection:
-    con = sqlite3.connect(str(_db_path()))
-    con.row_factory = sqlite3.Row
-    return con
+def get_db():
+    db = SessionLocal()
+    try:
+        yield db
+    finally:
+        db.close()
 
 
-def _utc_now_iso() -> str:
+def utc_now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
-
-def _ensure_schema() -> None:
-    """
-    Garante tabela item_movimentos e colunas extras para auditoria.
-    Não quebra se já existir sem as colunas; tenta ALTER e ignora erro.
-    """
-    con = _connect()
-    cur = con.cursor()
-
-    # Tabela base (se não existir)
-    cur.execute(
-        """
-        CREATE TABLE IF NOT EXISTS item_movimentos (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            kit_id INTEGER NOT NULL,
-            patrimonio TEXT NOT NULL,
-            tipo TEXT NOT NULL, -- DISTRIBUIR | RECOLHER
-            encarregado_id INTEGER NOT NULL,
-            subresponsavel_id INTEGER,
-            created_at TEXT NOT NULL
-        );
-        """
-    )
-
-    # Colunas extras (tentativa “best effort”)
-    for stmt in [
-        "ALTER TABLE item_movimentos ADD COLUMN lat REAL DEFAULT 0",
-        "ALTER TABLE item_movimentos ADD COLUMN lng REAL DEFAULT 0",
-        "ALTER TABLE item_movimentos ADD COLUMN accuracy_m REAL DEFAULT 0",
-        "ALTER TABLE item_movimentos ADD COLUMN gps_timestamp TEXT",
-        "ALTER TABLE item_movimentos ADD COLUMN gps_ok INTEGER DEFAULT 0",
-        "ALTER TABLE item_movimentos ADD COLUMN observacao TEXT",
-    ]:
-        try:
-            cur.execute(stmt)
-        except sqlite3.OperationalError:
-            # coluna já existe (ou SQLite antigo); ignora
-            pass
-
-    con.commit()
-    con.close()
-
-
-# roda ao importar o router
-_ensure_schema()
-
-
-# =========================
-# Models (payloads)
-# =========================
 
 class DistribuirBody(BaseModel):
     kit_id: int
@@ -98,7 +35,7 @@ class DistribuirBody(BaseModel):
 
     lat: float = 0
     lng: float = 0
-    accuracy_m: float = 0  # obrigatório no seu schema anterior: aqui garantido sempre
+    accuracy_m: float = 0
     gps_timestamp: Optional[str] = None
     observacao: Optional[str] = None
 
@@ -115,183 +52,179 @@ class RecolherBody(BaseModel):
     observacao: Optional[str] = None
 
 
-# =========================
-# Util validações
-# =========================
-
-def _validate_pin(pin: str) -> None:
+def validate_pin(pin: str) -> None:
     if not (pin.isdigit() and len(pin) == 6):
-        raise HTTPException(status_code=400, detail="PIN deve ter 6 dígitos numéricos")
+        raise HTTPException(status_code=400, detail="PIN deve ter 6 digitos numericos")
 
 
-def _get_subresponsavel(con: sqlite3.Connection, sub_id: int) -> sqlite3.Row:
-    cur = con.cursor()
-    row = cur.execute(
-        "SELECT id, nome, secao, ativo, pin_hash FROM subresponsaveis WHERE id=?",
-        (sub_id,),
-    ).fetchone()
+def get_subresponsavel(db: Session, sub_id: int):
+    row = db.execute(
+        text(
+            """
+            SELECT id, nome, secao, ativo, pin
+            FROM subresponsaveis
+            WHERE id = :id
+            """
+        ),
+        {"id": sub_id},
+    ).mappings().first()
 
     if not row:
-        raise HTTPException(status_code=404, detail="Subresponsável não encontrado")
-
+        raise HTTPException(status_code=404, detail="Subresponsavel nao encontrado")
     if int(row["ativo"] or 0) != 1:
-        raise HTTPException(status_code=400, detail="Subresponsável inativo")
-
-    if not row["pin_hash"]:
-        raise HTTPException(status_code=400, detail="Subresponsável sem PIN cadastrado")
-
+        raise HTTPException(status_code=400, detail="Subresponsavel inativo")
+    if not row["pin"]:
+        raise HTTPException(status_code=400, detail="Subresponsavel sem PIN cadastrado")
     return row
 
 
-def _check_pin(pin: str, pin_hash: str) -> None:
-    """
-    Verifica PIN com o verify_pin do utils/security.py.
-    Se o verify_pin não existir, dá erro orientando.
-    """
-    if verify_pin is None:
-        raise HTTPException(
-            status_code=500,
-            detail="verify_pin não encontrado em utils/security.py. Implemente verify_pin(pin, pin_hash).",
-        )
-
-    try:
-        ok = bool(verify_pin(pin, pin_hash))
-    except Exception as e:
-        # erro típico: passlib/bcrypt quebrado
-        raise HTTPException(
-            status_code=500,
-            detail=f"Falha ao validar PIN (biblioteca de hash). Erro: {type(e).__name__}: {e}",
-        )
-
-    if not ok:
+def check_pin(pin: str, pin_db: str) -> None:
+    if pin != str(pin_db).strip():
         raise HTTPException(status_code=401, detail="PIN incorreto")
 
 
-# =========================
-# Endpoints
-# =========================
+def get_item_id(db: Session, patrimonio: str) -> Optional[int]:
+    row = db.execute(
+        text("SELECT id FROM itens WHERE patrimonio = :p LIMIT 1"),
+        {"p": patrimonio.strip()},
+    ).first()
+    return row[0] if row else None
+
 
 @router.post("/distribuir")
-def distribuir_item(body: DistribuirBody):
-    """
-    Registra um movimento DISTRIBUIR.
-    - NÃO bloqueia se GPS vier 0,0 (desktop/ambiente sem permissão).
-    - Mantém auditável: gps_ok = 1 quando lat/lng != 0.
-    """
-    _validate_pin(body.pin)
+def distribuir_item(body: DistribuirBody, db: Session = Depends(get_db)):
+    validate_pin(body.pin)
 
-    con = _connect()
-    try:
-        sub = _get_subresponsavel(con, body.subresponsavel_id)
-        _check_pin(body.pin, sub["pin_hash"])
+    sub = get_subresponsavel(db, body.subresponsavel_id)
+    check_pin(body.pin, sub["pin"])
 
-        gps_ok = 0 if (float(body.lat) == 0.0 and float(body.lng) == 0.0) else 1
+    item_id = get_item_id(db, body.patrimonio)
+    if not item_id:
+        raise HTTPException(status_code=404, detail="Item nao encontrado para o patrimonio informado")
 
-        created_at = _utc_now_iso()
-        gps_ts = body.gps_timestamp or created_at
+    created_at = utc_now_iso()
+    gps_ts = body.gps_timestamp or created_at
 
-        cur = con.cursor()
-        cur.execute(
+    db.execute(
+        text(
             """
             INSERT INTO item_movimentos
-            (kit_id, patrimonio, tipo, encarregado_id, subresponsavel_id, created_at,
-             lat, lng, accuracy_m, gps_timestamp, gps_ok, observacao)
+            (data_hora, kit_id, encarregado_id, item_id, acao, subresponsavel_id,
+             latitude, longitude, accuracy_m, gps_timestamp, observacao)
             VALUES
-            (?, ?, 'DISTRIBUIR', ?, ?, ?,
-             ?, ?, ?, ?, ?, ?)
-            """,
-            (
-                int(body.kit_id),
-                body.patrimonio.strip(),
-                int(body.encarregado_id),
-                int(body.subresponsavel_id),
-                created_at,
-                float(body.lat or 0),
-                float(body.lng or 0),
-                float(body.accuracy_m or 0),
-                gps_ts,
-                int(gps_ok),
-                (body.observacao or "").strip() or None,
-            ),
-        )
-        con.commit()
-
-        mov_id = cur.lastrowid
-
-        return {
-            "status": "ok",
-            "movimento_id": mov_id,
-            "tipo": "DISTRIBUIR",
-            "kit_id": body.kit_id,
-            "patrimonio": body.patrimonio,
-            "encarregado_id": body.encarregado_id,
-            "subresponsavel_id": body.subresponsavel_id,
-            "subresponsavel_nome": sub["nome"],
-            "gps_ok": bool(gps_ok),
+            (NOW(), :kit_id, :enc_id, :item_id, 'DISTRIBUIR', :sub_id,
+             :lat, :lng, :acc, :gps_ts, :obs)
+            """
+        ),
+        {
+            "kit_id": int(body.kit_id),
+            "enc_id": int(body.encarregado_id),
+            "item_id": int(item_id),
+            "sub_id": int(body.subresponsavel_id),
             "lat": float(body.lat or 0),
             "lng": float(body.lng or 0),
-            "accuracy_m": float(body.accuracy_m or 0),
-            "gps_timestamp": gps_ts,
-            "created_at": created_at,
-        }
-    finally:
-        con.close()
+            "acc": float(body.accuracy_m or 0),
+            "gps_ts": gps_ts,
+            "obs": (body.observacao or "").strip() or None,
+        },
+    )
+
+    db.execute(
+        text(
+            """
+            INSERT INTO movimentos
+            (tipo, kit_id, patrimonio, encarregado_id, subresponsavel_id, quantidade, observacao)
+            VALUES
+            ('DISTRIBUIR', :kit_id, :patrimonio, :enc_id, :sub_id, 1, :obs)
+            """
+        ),
+        {
+            "kit_id": int(body.kit_id),
+            "patrimonio": body.patrimonio.strip(),
+            "enc_id": int(body.encarregado_id),
+            "sub_id": int(body.subresponsavel_id),
+            "obs": (body.observacao or "").strip() or None,
+        },
+    )
+
+    db.commit()
+
+    return {
+        "status": "ok",
+        "tipo": "DISTRIBUIR",
+        "kit_id": body.kit_id,
+        "patrimonio": body.patrimonio,
+        "encarregado_id": body.encarregado_id,
+        "subresponsavel_id": body.subresponsavel_id,
+        "subresponsavel_nome": sub["nome"],
+        "lat": float(body.lat or 0),
+        "lng": float(body.lng or 0),
+        "accuracy_m": float(body.accuracy_m or 0),
+        "gps_timestamp": gps_ts,
+        "created_at": created_at,
+    }
 
 
 @router.post("/recolher")
-def recolher_item(body: RecolherBody):
-    """
-    Registra um movimento RECOLHER.
-    - Não exige PIN.
-    - Não bloqueia GPS 0,0.
-    """
-    con = _connect()
-    try:
-        gps_ok = 0 if (float(body.lat) == 0.0 and float(body.lng) == 0.0) else 1
+def recolher_item(body: RecolherBody, db: Session = Depends(get_db)):
+    item_id = get_item_id(db, body.patrimonio)
+    if not item_id:
+        raise HTTPException(status_code=404, detail="Item nao encontrado para o patrimonio informado")
 
-        created_at = _utc_now_iso()
-        gps_ts = body.gps_timestamp or created_at
+    created_at = utc_now_iso()
+    gps_ts = body.gps_timestamp or created_at
 
-        cur = con.cursor()
-        cur.execute(
+    db.execute(
+        text(
             """
             INSERT INTO item_movimentos
-            (kit_id, patrimonio, tipo, encarregado_id, subresponsavel_id, created_at,
-             lat, lng, accuracy_m, gps_timestamp, gps_ok, observacao)
+            (data_hora, kit_id, encarregado_id, item_id, acao, subresponsavel_id,
+             latitude, longitude, accuracy_m, gps_timestamp, observacao)
             VALUES
-            (?, ?, 'RECOLHER', ?, NULL, ?,
-             ?, ?, ?, ?, ?, ?)
-            """,
-            (
-                int(body.kit_id),
-                body.patrimonio.strip(),
-                int(body.encarregado_id),
-                created_at,
-                float(body.lat or 0),
-                float(body.lng or 0),
-                float(body.accuracy_m or 0),
-                gps_ts,
-                int(gps_ok),
-                (body.observacao or "").strip() or None,
-            ),
-        )
-        con.commit()
-
-        mov_id = cur.lastrowid
-
-        return {
-            "status": "ok",
-            "movimento_id": mov_id,
-            "tipo": "RECOLHER",
-            "kit_id": body.kit_id,
-            "patrimonio": body.patrimonio,
-            "encarregado_id": body.encarregado_id,
-            "gps_ok": bool(gps_ok),
+            (NOW(), :kit_id, :enc_id, :item_id, 'RECOLHER', NULL,
+             :lat, :lng, :acc, :gps_ts, :obs)
+            """
+        ),
+        {
+            "kit_id": int(body.kit_id),
+            "enc_id": int(body.encarregado_id),
+            "item_id": int(item_id),
             "lat": float(body.lat or 0),
             "lng": float(body.lng or 0),
-            "accuracy_m": float(body.accuracy_m or 0),
-            "gps_timestamp": gps_ts,
-            "created_at": created_at,
-        }
-    finally:
-        con.close()
+            "acc": float(body.accuracy_m or 0),
+            "gps_ts": gps_ts,
+            "obs": (body.observacao or "").strip() or None,
+        },
+    )
+
+    db.execute(
+        text(
+            """
+            INSERT INTO movimentos
+            (tipo, kit_id, patrimonio, encarregado_id, subresponsavel_id, quantidade, observacao)
+            VALUES
+            ('RECOLHER', :kit_id, :patrimonio, :enc_id, NULL, 1, :obs)
+            """
+        ),
+        {
+            "kit_id": int(body.kit_id),
+            "patrimonio": body.patrimonio.strip(),
+            "enc_id": int(body.encarregado_id),
+            "obs": (body.observacao or "").strip() or None,
+        },
+    )
+
+    db.commit()
+
+    return {
+        "status": "ok",
+        "tipo": "RECOLHER",
+        "kit_id": body.kit_id,
+        "patrimonio": body.patrimonio,
+        "encarregado_id": body.encarregado_id,
+        "lat": float(body.lat or 0),
+        "lng": float(body.lng or 0),
+        "accuracy_m": float(body.accuracy_m or 0),
+        "gps_timestamp": gps_ts,
+        "created_at": created_at,
+    }
