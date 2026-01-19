@@ -16,8 +16,6 @@ function authHeaders() {
 
 function norm(path) {
   if (!path.startsWith("/")) path = `/${path}`;
-  // mantém sua regra: adiciona "/" no final quando não tem "?" e não é "/"
-  if (path !== "/" && !path.includes("?") && !path.endsWith("/")) path += "/";
   return path;
 }
 
