@@ -33,3 +33,12 @@ pwa/.env.*
 pwa/.env
 pwa/.env.*
 
+# certificados e chaves (NUNCA versionar)
+**/certs/*
+**/*.pem
+**/*.key
+**/*.bak.pem
+
+# temporários / debug
+*hash*.txt
+temp-*.json
