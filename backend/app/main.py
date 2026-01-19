@@ -50,21 +50,27 @@ def debug_jwt2():
 # ======================================================
 # CORS – LIBERADO PARA REDE (DEV INTERNO)
 # ======================================================
+def _parse_env_list(name: str) -> list[str]:
+    raw = os.getenv(name, "")
+    return [entry.strip() for entry in raw.split(",") if entry.strip()]
+
+DEFAULT_CORS_ORIGINS = [
+    "http://localhost:5173",
+    "http://127.0.0.1:5173",
+    "http://localhost:5174",
+    "http://127.0.0.1:5174",
+    "http://localhost:3000",
+    "http://127.0.0.1:3000",
+    # Se quiser travar em IP específico, pode deixar só os seus aqui
+    "http://192.168.0.130:5173",
+    "http://192.168.0.154:5173",
+]
+origins = _parse_env_list("CORS_ORIGINS") or DEFAULT_CORS_ORIGINS
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        "http://localhost:5173",
-        "http://127.0.0.1:5173",
-        "http://localhost:5174",
-        "http://127.0.0.1:5174",
-        "http://localhost:3000",
-        "http://127.0.0.1:3000",
-        # Se quiser travar em IP específico, pode deixar só os seus aqui
-        "http://192.168.0.130:5173",
-        "http://192.168.0.154:5173",
-    ],
+    allow_origins=origins,
     # ✅ libera qualquer host local/lan em DEV (evita ficar editando IP toda hora)
-    allow_origin_regex=r"^http://(localhost|127\.0\.0\.1|192\.168\.\d{1,3}\.\d{1,3})(:\d+)?$",
+    allow_origin_regex=r"^https?://(localhost|127\.0\.0\.1|192\.168\.\d{1,3}\.\d{1,3}|ferramental\.local|ferramental\.perfilx\.corp)(:\d+)?$",
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
