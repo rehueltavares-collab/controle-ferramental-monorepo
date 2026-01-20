@@ -105,10 +105,6 @@ export async function entregarManual(payload) {
 // ===============================
 // ADMIN
 // ===============================
-export async function adminPessoas(query = "") {
-  return apiGet(`/admin/pessoas?query=${encodeURIComponent(query)}`);
-}
-
 export async function adminBusca({ query = "", setorId = "" }) {
   const params = new URLSearchParams();
   if (query) params.set("query", query);

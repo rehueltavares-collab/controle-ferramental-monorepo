@@ -12,7 +12,6 @@ import {
   definirSenha,
   listarManuais,
   entregarManual,
-  adminPessoas,
   adminBusca,
   adminManualPosse,
   adminTrilhaKit,
@@ -1090,9 +1089,6 @@ export default function App() {
   // Admin panel state
   const [adminQuery, setAdminQuery] = useState("");
   const [adminSetorId, setAdminSetorId] = useState("");
-  const [adminPessoaTipo, setAdminPessoaTipo] = useState("");
-  const [adminPessoaId, setAdminPessoaId] = useState("");
-  const [adminPessoas, setAdminPessoas] = useState([]);
   const [adminResults, setAdminResults] = useState(null);
   const [adminManualPosseRows, setAdminManualPosseRows] = useState([]);
   const [adminTrail, setAdminTrail] = useState(null);
@@ -1163,12 +1159,6 @@ export default function App() {
   }, [currentUser]);
 
   useEffect(() => {
-    if (currentUser?.role === "admin") {
-      loadAdminPeople();
-    }
-  }, [currentUser]);
-
-  useEffect(() => {
     const hasEletrico = Boolean(currentUser?.encarregado_id);
     if (modo === "eletrico" && !hasEletrico) {
       setModo("manual");
@@ -1209,21 +1199,6 @@ export default function App() {
     }
   }
 
-  async function loadAdminPeople() {
-    try {
-      const res = await adminPessoas("");
-      const encs = safeArray(res?.encarregados);
-      const subs = safeArray(res?.subresponsaveis);
-      const merged = [
-        ...encs.map((p) => ({ ...p, tipo: "encarregado" })),
-        ...subs.map((p) => ({ ...p, tipo: "subresponsavel" })),
-      ];
-      setAdminPessoas(merged);
-    } catch {
-      setAdminPessoas([]);
-    }
-  }
-
   async function runAdminBusca() {
     setAdminLoading(true);
     setAdminErr("");
@@ -1239,8 +1214,6 @@ export default function App() {
       const posseRes = await adminManualPosse({
         query: adminQuery.trim(),
         setorId: adminSetorId,
-        pessoaTipo: adminPessoaTipo,
-        pessoaId: adminPessoaId,
       });
       setAdminManualPosseRows(safeArray(posseRes?.posse));
     } catch (e) {
@@ -1990,8 +1963,6 @@ export default function App() {
 
   const adminKits = safeArray(adminResults?.kits);
   const adminItens = safeArray(adminResults?.itens);
-  const adminPessoasRes = safeArray(adminResults?.pessoas);
-  const adminManuaisRes = safeArray(adminResults?.manuais);
 
   const gpsLabel = isGpsValid(geo) ? "GPS ok" : geo.ok ? "GPS inválido" : "GPS indisponível";
 
@@ -2284,29 +2255,6 @@ export default function App() {
                 ))}
               </select>
 
-              <select
-                style={{ padding: 10, minWidth: 220 }}
-                value={adminPessoaTipo && adminPessoaId ? `${adminPessoaTipo}:${adminPessoaId}` : ""}
-                onChange={(e) => {
-                  const v = e.target.value;
-                  if (!v) {
-                    setAdminPessoaTipo("");
-                    setAdminPessoaId("");
-                    return;
-                  }
-                  const [t, id] = v.split(":");
-                  setAdminPessoaTipo(t);
-                  setAdminPessoaId(id);
-                }}
-              >
-                <option value="">Todas as pessoas</option>
-                {adminPessoas.map((p) => (
-                  <option key={`${p.tipo}-${p.id}`} value={`${p.tipo}:${p.id}`}>
-                    {p.nome} ({p.tipo})
-                  </option>
-                ))}
-              </select>
-
               <button
                 onClick={runAdminBusca}
                 disabled={adminLoading}
@@ -2331,81 +2279,63 @@ export default function App() {
             </div>
           ) : null}
 
-          <div style={{ display: "grid", gap: 12, gridTemplateColumns: "repeat(auto-fit, minmax(260px, 1fr))" }}>
-            <div style={{ border: "1px solid #ddd", borderRadius: 12, padding: 10 }}>
-              <div style={{ fontWeight: 700, marginBottom: 6 }}>Kits</div>
-              {adminKits.length === 0 ? (
-                <div style={{ fontSize: 12, opacity: 0.7 }}>Sem resultados.</div>
-              ) : (
-                adminKits.map((k) => (
-                  <div key={k.id} style={{ display: "flex", justifyContent: "space-between", gap: 8, padding: "4px 0" }}>
-                    <div>#{k.id} {k.nome}</div>
-                    <button
-                      onClick={() => openTrailKit(k)}
-                      style={{ padding: "2px 6px", border: "1px solid #111", borderRadius: 6, cursor: "pointer" }}
-                    >
-                      Trilha
-                    </button>
-                  </div>
-                ))
-              )}
+          <div className="admin-results-grid">
+            <div className="admin-panel-card">
+              <h3>Kits</h3>
+              <div className="admin-list-scroll">
+                {adminKits.length === 0 ? (
+                  <div style={{ fontSize: 12, opacity: 0.7 }}>Sem resultados.</div>
+                ) : (
+                  adminKits.map((k) => (
+                    <div key={k.id} style={{ display: "flex", justifyContent: "space-between", gap: 8, padding: "4px 0" }}>
+                      <div>#{k.id} {k.nome}</div>
+                      <button
+                        onClick={() => openTrailKit(k)}
+                        style={{ padding: "2px 6px", border: "1px solid #111", borderRadius: 6, cursor: "pointer" }}
+                      >
+                        Trilha
+                      </button>
+                    </div>
+                  ))
+                )}
+              </div>
             </div>
 
-            <div style={{ border: "1px solid #ddd", borderRadius: 12, padding: 10 }}>
-              <div style={{ fontWeight: 700, marginBottom: 6 }}>Itens (patrimonio)</div>
-              {adminItens.length === 0 ? (
-                <div style={{ fontSize: 12, opacity: 0.7 }}>Sem resultados.</div>
-              ) : (
-                adminItens.map((it) => (
-                  <div key={it.id} style={{ display: "flex", justifyContent: "space-between", gap: 8, padding: "4px 0" }}>
-                    <div>{it.patrimonio}</div>
-                    <button
-                      onClick={() => openTrailPatrimonio(it)}
-                      style={{ padding: "2px 6px", border: "1px solid #111", borderRadius: 6, cursor: "pointer" }}
-                    >
-                      Trilha
-                    </button>
-                  </div>
-                ))
-              )}
+            <div className="admin-panel-card">
+              <h3>Itens (patrimônio)</h3>
+              <div className="admin-list-scroll">
+                {adminItens.length === 0 ? (
+                  <div style={{ fontSize: 12, opacity: 0.7 }}>Sem resultados.</div>
+                ) : (
+                  adminItens.map((it) => (
+                    <div key={it.id} style={{ display: "flex", justifyContent: "space-between", gap: 8, padding: "4px 0" }}>
+                      <div>{it.patrimonio}</div>
+                      <button
+                        onClick={() => openTrailPatrimonio(it)}
+                        style={{ padding: "2px 6px", border: "1px solid #111", borderRadius: 6, cursor: "pointer" }}
+                      >
+                        Trilha
+                      </button>
+                    </div>
+                  ))
+                )}
+              </div>
             </div>
 
-            <div style={{ border: "1px solid #ddd", borderRadius: 12, padding: 10 }}>
-              <div style={{ fontWeight: 700, marginBottom: 6 }}>Pessoas</div>
-              {adminPessoasRes.length === 0 ? (
-                <div style={{ fontSize: 12, opacity: 0.7 }}>Sem resultados.</div>
-              ) : (
-                adminPessoasRes.map((p, idx) => (
-                  <div key={`${p.tipo}-${p.id}-${idx}`} style={{ padding: "4px 0" }}>
-                    {p.nome} ({p.tipo})
-                  </div>
-                ))
-              )}
+            <div className="admin-panel-card">
+              <h3>Posse manual (atual)</h3>
+              <div className="admin-list-scroll">
+                {adminManualPosseRows.length === 0 ? (
+                  <div style={{ fontSize: 12, opacity: 0.7 }}>Sem resultados.</div>
+                ) : (
+                  adminManualPosseRows.map((row) => (
+                    <div key={row.id} style={{ padding: "4px 0", fontSize: 13 }}>
+                      {row.manual_item_nome} - {row.quantidade} un. - {row.encarregado_nome || row.subresponsavel_nome || "-"}
+                    </div>
+                  ))
+                )}
+              </div>
             </div>
-
-            <div style={{ border: "1px solid #ddd", borderRadius: 12, padding: 10 }}>
-              <div style={{ fontWeight: 700, marginBottom: 6 }}>Itens manuais</div>
-              {adminManuaisRes.length === 0 ? (
-                <div style={{ fontSize: 12, opacity: 0.7 }}>Sem resultados.</div>
-              ) : (
-                adminManuaisRes.map((m) => (
-                  <div key={m.id} style={{ padding: "4px 0" }}>{m.nome}</div>
-                ))
-              )}
-            </div>
-          </div>
-
-          <div style={{ border: "1px solid #ddd", borderRadius: 12, padding: 10, marginTop: 12 }}>
-            <div style={{ fontWeight: 700, marginBottom: 6 }}>Posse manual (atual)</div>
-            {adminManualPosseRows.length === 0 ? (
-              <div style={{ fontSize: 12, opacity: 0.7 }}>Sem resultados.</div>
-            ) : (
-              adminManualPosseRows.map((row) => (
-                <div key={row.id} style={{ padding: "4px 0", fontSize: 13 }}>
-                  {row.manual_item_nome} - {row.quantidade} un. - {row.encarregado_nome || row.subresponsavel_nome || "-"}
-                </div>
-              ))
-            )}
           </div>
 
           {adminTrail ? (

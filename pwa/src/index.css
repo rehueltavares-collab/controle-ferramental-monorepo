@@ -66,3 +66,24 @@ button:focus-visible {
     background-color: #f9f9f9;
   }
 }
+
+/* Admin: layout compacto */
+.admin-results-grid{
+  display: grid;
+  grid-template-columns: repeat(3, minmax(260px, 1fr));
+  gap: 12px;
+  align-items: start;
+}
+
+.admin-panel-card{
+  border: 1px solid rgba(255,255,255,.12);
+  border-radius: 14px;
+  background: rgba(0,0,0,.25);
+  padding: 12px;
+}
+
+.admin-list-scroll{
+  max-height: 260px; /* ~10 linhas */
+  overflow-y: auto;
+  padding-right: 6px;
+}
