@@ -1072,6 +1072,9 @@ export default function App() {
   const [checklistAssinatura, setChecklistAssinatura] = useState("");
   const [checklistTermoMsg, setChecklistTermoMsg] = useState("");
   const [checklistTermoSubmitting, setChecklistTermoSubmitting] = useState(false);
+  const [substModalItem, setSubstModalItem] = useState(null);
+  const [substSubmitting, setSubstSubmitting] = useState(false);
+  const [substObservacao, setSubstObservacao] = useState("");
 
   /**
    * =========================================================
@@ -1895,31 +1898,33 @@ export default function App() {
   }
 
   // 3) Solicitar substituição (usuário só solicita + motivo; admin escolhe equivalente e valida com PIN)
-  async function handleSolicitarSubstituicao(item) {
+  function handleSolicitarSubstituicao(item) {
     if (!selectedKitId || !item) return;
+    setSubstModalItem(item);
+    setSubstObservacao("");
+  }
 
-    const motivo = window.prompt(
-      "Motivo da substituição (manutenção / furto / perda / outro):"
-    );
-    if (motivo == null) return;
-    const m = String(motivo).trim();
-    if (!m) {
-      toast("Informe o motivo da substituição.");
-      return;
-    }
+  async function submitSolicitacaoSubstituicao(motivo) {
+    if (!selectedKitId || !substModalItem) return;
 
+    if (!["MANUTENCAO", "FURTO"].includes(motivo)) return;
+
+    setSubstSubmitting(true);
     try {
       await apiPost("/solicitacoes/substituicao", {
         kit_id: Number(selectedKitId),
-        kit_item_id: Number(item.kit_item_id),
-        patrimonio: String(item.patrimonio),
-        motivo: m,
-        observacao: "PWA",
+        kit_item_id: Number(substModalItem.kit_item_id),
+        patrimonio: String(substModalItem.patrimonio),
+        motivo,
+        observacao: substObservacao ? `PWA: ${substObservacao}` : "PWA",
       });
       toast("Solicitação de substituição enviada. Admin vai escolher equivalente e validar com PIN.");
+      setSubstModalItem(null);
     } catch (e) {
       toast("Não consegui registrar no backend (endpoint de substituição ainda não confirmado).");
       console.warn("substituicao request error:", e);
+    } finally {
+      setSubstSubmitting(false);
     }
   }
 
@@ -2936,6 +2941,112 @@ export default function App() {
       <div style={{ marginTop: 14, fontSize: 12, opacity: 0.75 }}>
         Regra: checklist confirma o kit completo e mantém o histórico dos itens distribuídos; devoluções e substituições só são fechadas pelo admin com PIN.
       </div>
+
+      {substModalItem && (
+        <div
+          onClick={() => {
+            if (!substSubmitting) {
+              setSubstModalItem(null);
+            }
+          }}
+          style={{
+            position: "fixed",
+            inset: 0,
+            background: "rgba(0,0,0,0.65)",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            zIndex: 99999,
+            padding: 16,
+          }}
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            style={{
+              width: "min(520px, 96vw)",
+              background: "#111",
+              color: "#f2f2f2",
+              borderRadius: 14,
+              padding: 20,
+              boxShadow: "0 20px 60px rgba(0,0,0,.45)",
+            }}
+          >
+            <div style={{ fontSize: 16, fontWeight: 700, marginBottom: 12 }}>
+              Motivo da substituição
+            </div>
+            <div style={{ fontSize: 13, marginBottom: 16, opacity: 0.85 }}>
+              Escolha o motivo padrão para a solicitação, o admin vai validar o PIN depois.
+            </div>
+            <div style={{ display: "flex", gap: 10, marginBottom: 12 }}>
+              <button
+                onClick={() => submitSolicitacaoSubstituicao("MANUTENCAO")}
+                disabled={substSubmitting}
+                style={{
+                  flex: 1,
+                  padding: "10px 12px",
+                  borderRadius: 10,
+                  border: "1px solid #0b7a38",
+                  background: "#0b7a38",
+                  color: "#fff",
+                  fontWeight: 700,
+                  cursor: substSubmitting ? "not-allowed" : "pointer",
+                }}
+              >
+                Manutenção
+              </button>
+              <button
+                onClick={() => submitSolicitacaoSubstituicao("FURTO")}
+                disabled={substSubmitting}
+                style={{
+                  flex: 1,
+                  padding: "10px 12px",
+                  borderRadius: 10,
+                  border: "1px solid #b71c1c",
+                  background: "#b71c1c",
+                  color: "#fff",
+                  fontWeight: 700,
+                  cursor: substSubmitting ? "not-allowed" : "pointer",
+                }}
+              >
+                Furto
+              </button>
+            </div>
+            <label style={{ fontSize: 12, opacity: 0.8, marginBottom: 4 }}>Observação opcional</label>
+            <textarea
+              value={substObservacao}
+              onChange={(e) => setSubstObservacao(e.target.value)}
+              rows={3}
+              placeholder="Detalhes extras (opcional)..."
+              style={{
+                width: "100%",
+                padding: 10,
+                borderRadius: 10,
+                border: "1px solid rgba(255,255,255,0.15)",
+                background: "#0f0f0f",
+                color: "#fff",
+                resize: "vertical",
+                marginBottom: 12,
+              }}
+            />
+            <div style={{ display: "flex", justifyContent: "flex-end", gap: 10 }}>
+              <button
+                onClick={() => setSubstModalItem(null)}
+                disabled={substSubmitting}
+                style={{
+                  padding: "8px 12px",
+                  borderRadius: 10,
+                  border: "1px solid #aaa",
+                  background: "#222",
+                  color: "#fff",
+                  cursor: substSubmitting ? "not-allowed" : "pointer",
+                }}
+              >
+                Cancelar
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
         </div>
         </div>
