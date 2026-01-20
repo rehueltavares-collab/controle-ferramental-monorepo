@@ -47,6 +47,19 @@ function sleep(ms) {
   return new Promise((r) => setTimeout(r, ms));
 }
 
+function formatDateTime(value) {
+  if (!value) return "—";
+  const d = value instanceof Date ? value : new Date(value);
+  if (Number.isNaN(d.getTime())) return String(value);
+  return d.toLocaleString("pt-BR", {
+    day: "2-digit",
+    month: "2-digit",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+}
+
 async function withRetry(fn, tries = 2, delayMs = 500) {
   let lastErr;
   for (let i = 0; i < tries; i++) {
@@ -1093,8 +1106,30 @@ export default function App() {
   const [adminManualPosseRows, setAdminManualPosseRows] = useState([]);
   const [adminTrail, setAdminTrail] = useState(null);
   const [adminTrailTitle, setAdminTrailTitle] = useState("");
+  const [adminTrailShowTech, setAdminTrailShowTech] = useState(false);
+  const [adminTermsShowHistory, setAdminTermsShowHistory] = useState(false);
   const [adminLoading, setAdminLoading] = useState(false);
   const [adminErr, setAdminErr] = useState("");
+
+  const adminTrailChecklists = safeArray(adminTrail?.checklists);
+
+  const adminTrailTerms = safeArray(adminTrail?.termos).sort((a, b) => {
+    const da = new Date(a?.criado_em || a?.created_at || a?.data_hora || 0).getTime();
+    const db = new Date(b?.criado_em || b?.created_at || b?.data_hora || 0).getTime();
+    return db - da;
+  });
+
+  const adminTrailLastTerm = adminTrailTerms[0] ?? null;
+  const adminTrailOldTerms = adminTrailTerms.slice(1);
+
+  const adminTrailMovements = safeArray(adminTrail?.movimentos);
+
+  const adminTrailLastUpdate =
+    adminTrailChecklists?.[0]?.data_hora ??
+    adminTrailLastTerm?.criado_em ??
+    adminTrailMovements?.[0]?.data_hora ??
+    adminTrailMovements?.[0]?.created_at ??
+    null;
 
   useEffect(() => {
     const onPop = () => {
