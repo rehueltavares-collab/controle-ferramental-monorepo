@@ -1075,6 +1075,7 @@ export default function App() {
   const [substModalItem, setSubstModalItem] = useState(null);
   const [substSubmitting, setSubstSubmitting] = useState(false);
   const [substObservacao, setSubstObservacao] = useState("");
+  const detalhesRef = useRef(null);
 
   /**
    * =========================================================
@@ -1096,6 +1097,18 @@ export default function App() {
   const distributedItems = useMemo(() => {
     return (kitItens ?? []).filter((x) => statusMap?.[x.kit_item_id]?.status === "DISTRIBUIDO");
   }, [kitItens, statusMap]);
+
+  const hasKitSelected = Boolean(selectedKitId);
+  const hasKitPosse =
+    (manualItens?.length ?? 0) > 0 || (distributedItems?.length ?? 0) > 0;
+  const showDetalhesKit = hasKitSelected && hasKitPosse;
+  const kitLabelDisplay = kitLabel || (selectedKitId ? `Kit #${selectedKitId}` : "—");
+  const focusDetalhes = () => {
+    detalhesRef.current?.scrollIntoView({
+      behavior: "smooth",
+      block: "start",
+    });
+  };
 
   function toast(msg) {
     setUiMsg(msg);
@@ -2578,61 +2591,77 @@ export default function App() {
 
       {modo === "manual" ? (
         <div style={{ marginBottom: 12 }}>
-          {manualErr ? (
-            <div style={{ background: "#ffe8e8", border: "1px solid #ffb3b3", padding: 10, marginBottom: 12 }}>
-              <b>Erro:</b> {manualErr}
-            </div>
-          ) : null}
+      {manualErr ? (
+        <div style={{ background: "#ffe8e8", border: "1px solid #ffb3b3", padding: 10, marginBottom: 12 }}>
+          <b>Erro:</b> {manualErr}
+        </div>
+      ) : null}
 
-          <div style={{ display: "flex", gap: 12, flexWrap: "wrap", marginBottom: 12 }}>
-            <div style={{ minWidth: 320 }}>
-              <label style={{ fontSize: 12, opacity: 0.85 }}>Busca item manual</label>
-              <input
-                style={{ width: "100%", padding: 10 }}
-                placeholder="Ex: chave combinada, carrinho..."
-                value={manualQuery}
-                onChange={(e) => setManualQuery(e.target.value)}
-              />
-            </div>
-          </div>
+      <div style={{ display: "flex", gap: 12, flexWrap: "wrap", marginBottom: 12 }}>
+        <div style={{ minWidth: 320 }}>
+          <label style={{ fontSize: 12, opacity: 0.85 }}>Busca item manual</label>
+          <input
+            style={{ width: "100%", padding: 10 }}
+            placeholder="Ex: chave combinada, carrinho..."
+            value={manualQuery}
+            onChange={(e) => setManualQuery(e.target.value)}
+          />
+        </div>
+      </div>
 
-          <div style={{ border: "1px solid #ddd", borderRadius: 12, overflow: "hidden" }}>
-            <div className="manual-list-header">
-              <span className="manual-list-header__title">
-                {manualLoading ? "Carregando..." : `Mostrando ${manualItens.length} itens manuais`}
-              </span>
-            </div>
-            <div style={{ maxHeight: 520, overflow: "auto" }}>
-              {manualItens.map((it) => (
-                <div
-                  key={it.id}
+      <div
+        style={{
+          border: "1px solid rgba(255,255,255,0.25)",
+          borderRadius: 14,
+          overflow: "hidden",
+          background: "rgba(0,0,0,0.28)",
+        }}
+      >
+        <div style={{ padding: 12, fontWeight: 700, borderBottom: "1px solid rgba(255,255,255,0.08)" }}>
+          Meus avulsos
+        </div>
+        <div style={{ maxHeight: 520, overflow: "auto", padding: 12 }}>
+          {manualLoading ? (
+            <div style={{ fontSize: 12, opacity: 0.75 }}>Carregando...</div>
+          ) : manualItens.length === 0 ? (
+            <div style={{ fontSize: 12, opacity: 0.75 }}>Sem avulsos em posse.</div>
+          ) : (
+            manualItens.map((it) => (
+              <div
+                key={it.id}
+                style={{
+                  padding: 10,
+                  borderTop: it.id ? "1px solid rgba(255,255,255,0.08)" : "none",
+                  display: "flex",
+                  justifyContent: "space-between",
+                  gap: 12,
+                  alignItems: "center",
+                }}
+              >
+                <div>
+                  <div style={{ fontWeight: 700 }}>{it.nome}</div>
+                  <div style={{ fontSize: 12, opacity: 0.75 }}>
+                    {it.status || "Presente sob sua responsabilidade"}
+                  </div>
+                </div>
+                <button
+                  onClick={() => openManualTermo(it)}
                   style={{
-                    padding: 10,
-                    borderTop: "1px solid #eee",
-                    display: "flex",
-                    justifyContent: "space-between",
-                    gap: 12,
-                    alignItems: "center",
+                    padding: "6px 10px",
+                    border: "1px solid #111",
+                    borderRadius: 8,
+                    background: "#111",
+                    color: "#fff",
+                    cursor: "pointer",
                   }}
                 >
-                  <div style={{ fontWeight: 700 }}>{it.nome}</div>
-                  <button
-                    onClick={() => openManualTermo(it)}
-                    style={{
-                      padding: "6px 10px",
-                      border: "1px solid #111",
-                      borderRadius: 8,
-                      background: "#111",
-                      color: "#fff",
-                      cursor: "pointer",
-                    }}
-                  >
-                    Retirar
-                  </button>
-                </div>
-              ))}
-            </div>
-          </div>
+                  Retirar
+                </button>
+              </div>
+            ))
+          )}
+        </div>
+      </div>
 
           {manualTermoOpen && manualSel ? (
             <div
@@ -2925,21 +2954,86 @@ export default function App() {
         />
       </div>
 
-      <DetalhesKitCard
-        items={kitItens}
-        statusMap={statusMap}
-        geo={geo}
-        selectedKitId={selectedKitId}
-        kitLabel={kitLabel}
-        selectedEncarregadoId={selectedEncarregadoId}
-        onSolicitarSubstituicao={handleSolicitarSubstituicao}
-        onReagrupar={handleReagruparItem}
-        onPickSubresponsavel={handleSubresponsavelPick}
-        onConfirmDistribuicao={markDistribConfirmado}
-      />
+      {hasKitPosse && (
+        <div
+          style={{
+            border: "1px solid rgba(255,255,255,0.15)",
+            borderRadius: 14,
+            padding: 16,
+            marginTop: 12,
+            background: "rgba(0,0,0,0.25)",
+          }}
+        >
+          <div style={{ fontWeight: 700, marginBottom: 4 }}>Meus kits cautelados</div>
+          <div style={{ marginBottom: 10, fontSize: 12, opacity: 0.8 }}>{kitLabelDisplay}</div>
+          <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+            <button
+              onClick={focusDetalhes}
+              style={{
+                padding: "8px 12px",
+                borderRadius: 10,
+                border: "1px solid #111",
+                background: "#111",
+                color: "#fff",
+                cursor: "pointer",
+                fontWeight: 700,
+              }}
+            >
+              Detalhes
+            </button>
+            <button
+              onClick={handleRequestDevolucao}
+              style={{
+                padding: "8px 12px",
+                borderRadius: 10,
+                border: "1px solid rgba(255,255,255,0.4)",
+                background: "transparent",
+                color: "#f0f0f0",
+                cursor: "pointer",
+                fontWeight: 700,
+              }}
+            >
+              Devolver
+            </button>
+          </div>
+        </div>
+      )}
 
-      <div style={{ marginTop: 14, fontSize: 12, opacity: 0.75 }}>
-        Regra: checklist confirma o kit completo e mantém o histórico dos itens distribuídos; devoluções e substituições só são fechadas pelo admin com PIN.
+      <div ref={detalhesRef}>
+        {showDetalhesKit ? (
+          <>
+            <DetalhesKitCard
+              items={kitItens}
+              statusMap={statusMap}
+              geo={geo}
+              selectedKitId={selectedKitId}
+              kitLabel={kitLabel}
+              selectedEncarregadoId={selectedEncarregadoId}
+              onSolicitarSubstituicao={handleSolicitarSubstituicao}
+              onReagrupar={handleReagruparItem}
+              onPickSubresponsavel={handleSubresponsavelPick}
+              onConfirmDistribuicao={markDistribConfirmado}
+            />
+
+            <div style={{ marginTop: 14, fontSize: 12, opacity: 0.75 }}>
+              Regra: checklist confirma o kit completo e mantém o histórico dos itens distribuídos; devoluções
+              e substituições só são fechadas pelo admin com PIN.
+            </div>
+          </>
+        ) : (
+          <div
+            style={{
+              border: "1px dashed rgba(0,0,0,.3)",
+              borderRadius: 12,
+              padding: 16,
+              marginTop: 12,
+              fontSize: 13,
+              opacity: 0.75,
+            }}
+          >
+            Você ainda não tem kit cautelado. Solicite acima para liberar operações.
+          </div>
+        )}
       </div>
 
       {substModalItem && (
