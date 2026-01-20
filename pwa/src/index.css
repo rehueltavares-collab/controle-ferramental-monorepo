@@ -290,6 +290,46 @@ button:focus-visible {
   border: 1px solid rgba(255,255,255,.16) !important;
 }
 
+/* ===== USER TOP BAR (Usuário / Sair) ===== */
+.user-panel .user-topbar{
+  background: #0f0f10 !important;
+  border: 1px solid rgba(255,255,255,0.10) !important;
+  border-radius: 16px !important;
+  padding: 14px 16px !important;
+}
+
+.user-panel .user-topbar__title{
+  color: #f5f5f5 !important;
+  font-weight: 800 !important;
+  letter-spacing: .2px;
+}
+
+.user-panel .user-topbar__subtitle{
+  color: rgba(255,255,255,0.70) !important;
+}
+
+.user-panel .user-topbar__logout{
+  background: #111 !important;
+  color: #fff !important;
+  border: 1px solid rgba(255,255,255,0.18) !important;
+  border-radius: 12px !important;
+  padding: 10px 14px !important;
+}
+
+/* ===== MANUAL LIST HEADER (“Mostrando 100 itens...”) ===== */
+.user-panel.mode-manual .manual-list-header{
+  background: #0f0f10 !important;
+  border: 1px solid rgba(255,255,255,0.10) !important;
+  border-radius: 14px !important;
+  padding: 10px 12px !important;
+  margin: 10px 0 12px !important;
+}
+
+.user-panel.mode-manual .manual-list-header__title{
+  color: rgba(255,255,255,0.85) !important;
+  font-size: 12px !important;
+}
+
 /* ===== User panel – modo elétrico: contraste consistente ===== */
 .user-panel.mode-eletrico {
   color: #eaeaea;

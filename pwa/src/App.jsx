@@ -2144,7 +2144,8 @@ export default function App() {
         API: <code>{apiBase}</code> • {gpsLabel} • {nowISO()}
       </div>
 
-      <div
+      <header
+        className="user-topbar"
         style={{
           display: "flex",
           justifyContent: "space-between",
@@ -2157,11 +2158,15 @@ export default function App() {
           background: "#f7f7f7",
         }}
       >
-        <div>
-          <div style={{ fontWeight: 800 }}>
+        <div className="user-topbar__text">
+          <div className="user-topbar__title" style={{ fontWeight: 800 }}>
             {hasProfile ? (isAdmin ? "Admin" : isOperador ? "Operador" : "Usuario") : "Carregando"}
           </div>
-          {roleCopy ? <div style={{ fontSize: 12, opacity: 0.8 }}>{roleCopy}</div> : null}
+          {roleCopy ? (
+            <div className="user-topbar__subtitle" style={{ fontSize: 12, opacity: 0.8 }}>
+              {roleCopy}
+            </div>
+          ) : null}
           {authNotice ? (
             <div style={{ fontSize: 12, color: "#b26d00", marginTop: 4 }}>{authNotice}</div>
           ) : null}
@@ -2173,6 +2178,7 @@ export default function App() {
           ) : null}
         </div>
         <button
+          className="user-topbar__logout"
           onClick={handleLogout}
           style={{
             padding: "8px 12px",
@@ -2186,7 +2192,7 @@ export default function App() {
         >
           Sair
         </button>
-      </div>
+      </header>
 
 
 
@@ -2586,8 +2592,10 @@ export default function App() {
           </div>
 
           <div style={{ border: "1px solid #ddd", borderRadius: 12, overflow: "hidden" }}>
-            <div style={{ padding: 10, background: "#f7f7f7", fontSize: 13 }}>
-              {manualLoading ? "Carregando..." : `Mostrando ${manualItens.length} itens manuais`}
+            <div className="manual-list-header">
+              <span className="manual-list-header__title">
+                {manualLoading ? "Carregando..." : `Mostrando ${manualItens.length} itens manuais`}
+              </span>
             </div>
             <div style={{ maxHeight: 520, overflow: "auto" }}>
               {manualItens.map((it) => (
