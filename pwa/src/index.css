@@ -222,6 +222,74 @@ button:focus-visible {
   font-size: 12px;
 }
 
+/* ===== User panel: fix contraste no modo elétrico (override final) ===== */
+.user-panel.mode-eletrico {
+  color: #f2f2f2;
+}
+
+.user-panel.mode-eletrico section,
+.user-panel.mode-eletrico .card,
+.user-panel.mode-eletrico .panel,
+.user-panel.mode-eletrico .box,
+.user-panel.mode-eletrico [class*="card"],
+.user-panel.mode-eletrico [class*="panel"] {
+  background: #0f0f0f !important;
+  color: #f2f2f2 !important;
+  border-color: rgba(255,255,255,.12) !important;
+}
+
+.user-panel.mode-eletrico h1,
+.user-panel.mode-eletrico h2,
+.user-panel.mode-eletrico h3,
+.user-panel.mode-eletrico label,
+.user-panel.mode-eletrico .muted,
+.user-panel.mode-eletrico [class*="muted"],
+.user-panel.mode-eletrico small,
+.user-panel.mode-eletrico p {
+  color: rgba(255,255,255,.82) !important;
+}
+
+.user-panel.mode-eletrico input,
+.user-panel.mode-eletrico select,
+.user-panel.mode-eletrico textarea {
+  background: #121212 !important;
+  color: #f2f2f2 !important;
+  border: 1px solid rgba(255,255,255,.18) !important;
+}
+
+.user-panel.mode-eletrico input::placeholder,
+.user-panel.mode-eletrico textarea::placeholder {
+  color: rgba(255,255,255,.45) !important;
+}
+
+.user-panel.mode-eletrico input:focus,
+.user-panel.mode-eletrico select:focus,
+.user-panel.mode-eletrico textarea:focus {
+  outline: none !important;
+  border-color: rgba(255,255,255,.35) !important;
+  box-shadow: 0 0 0 3px rgba(255,255,255,.08) !important;
+}
+
+.user-panel.mode-eletrico button,
+.user-panel.mode-eletrico .btn,
+.user-panel.mode-eletrico [class*="btn"] {
+  background: #141414 !important;
+  color: #fff !important;
+  border: 1px solid rgba(255,255,255,.18) !important;
+}
+
+.user-panel.mode-eletrico button:disabled,
+.user-panel.mode-eletrico .btn:disabled {
+  opacity: .55 !important;
+}
+
+.user-panel.mode-eletrico [class*="badge"],
+.user-panel.mode-eletrico [class*="pill"] {
+  background: #141414 !important;
+  color: #fff !important;
+  border: 1px solid rgba(255,255,255,.16) !important;
+}
+
 /* ===== User panel – modo elétrico: contraste consistente ===== */
 .user-panel.mode-eletrico {
   color: #eaeaea;
