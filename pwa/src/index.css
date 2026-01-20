@@ -330,6 +330,44 @@ button:focus-visible {
   font-size: 12px !important;
 }
 
+/* FIX: mensagem de sucesso ficou "invisível" no modo escuro */
+.user-panel .alert,
+.user-panel .success,
+.user-panel .toast,
+.user-panel .notice,
+.user-panel [role="alert"]{
+  color: #111 !important;
+}
+
+/* Se o seu aviso é um bloco com fundo verde claro */
+.user-panel .alert-success,
+.user-panel .success,
+.user-panel .ok,
+.user-panel .msg-ok{
+  color: #111 !important;
+  font-weight: 600;
+}
+
+/* Se o fundo do aviso for claro e você quiser padronizar */
+.user-panel .alert-success,
+.user-panel .msg-ok{
+  background: #d7ffe1 !important;
+  border: 1px solid rgba(0,0,0,.15) !important;
+}
+
+/* Banner de confirmação (background inline claro) */
+.user-panel div[style*="background: rgb(233, 255, 240)"] {
+  color: #065f46 !important;
+  font-weight: 600;
+}
+
+/* fallback: qualquer banner claro com fundo inline */
+.user-panel div[style*="background: rgb(2"],
+.user-panel div[style*="background: rgb(23"],
+.user-panel div[style*="background: rgb(24"] {
+  color: #111 !important;
+}
+
 /* ===== User panel – modo elétrico: contraste consistente ===== */
 .user-panel.mode-eletrico {
   color: #eaeaea;
