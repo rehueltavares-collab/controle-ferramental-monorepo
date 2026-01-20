@@ -674,63 +674,6 @@ function Pill({ label, value }) {
   );
 }
 
-function AvulsosPanel({ avulsos, onSolicitarAvulso }) {
-  return (
-    <CardShell
-      title="Itens Avulsos"
-      subtitle="Ferramentas fora de kits (reserva para substituição/manutenção/uso temporário)."
-      right={
-        <span style={{ fontSize: 12, opacity: 0.7 }}>
-          Total: <b>{avulsos?.length ?? 0}</b>
-        </span>
-      }
-    >
-      {(!avulsos || avulsos.length === 0) ? (
-        <div style={{ fontSize: 12, opacity: 0.7 }}>
-          Nenhum item avulso disponível no momento. Quando o inventário consolidar, aqui aparece o “que sobrou do kit”.
-        </div>
-      ) : (
-        <div style={{ maxHeight: 220, overflow: "auto", borderRadius: 12, border: "1px solid #eee" }}>
-          {avulsos.map((it, idx) => (
-            <div
-              key={`${it.patrimonio ?? "avulso"}-${idx}`}
-              style={{
-                display: "flex",
-                justifyContent: "space-between",
-                alignItems: "center",
-                gap: 12,
-                padding: "10px 12px",
-                borderTop: idx === 0 ? "none" : "1px solid #f1f1f1",
-              }}
-            >
-              <div>
-                <div style={{ fontWeight: 800 }}>{it.patrimonio ?? "—"}</div>
-                <div style={{ fontSize: 12, opacity: 0.85 }}>{it.descricao ?? it.nome ?? "Item avulso"}</div>
-              </div>
-              <button
-                onClick={() => onSolicitarAvulso?.(it)}
-                style={{
-                  borderRadius: 10,
-                  border: "1px solid #111",
-                  background: "#111",
-                  color: "#fff",
-                  padding: "8px 10px",
-                  fontWeight: 800,
-                  cursor: "pointer",
-                  whiteSpace: "nowrap",
-                }}
-                title="Solicitar uso temporário deste item"
-              >
-                Solicitar
-              </button>
-            </div>
-          ))}
-        </div>
-      )}
-    </CardShell>
-  );
-}
-
 function SolicitacoesCard({ totals, items, statusMap, selectedKitId, canSubmit, submitting, onSubmitChecklist }) {
   const pendentes = useMemo(() => {
     if (!selectedKitId) return [];
@@ -779,59 +722,6 @@ function SolicitacoesCard({ totals, items, statusMap, selectedKitId, canSubmit, 
           <div style={{ padding: 12, fontSize: 12, opacity: 0.7 }}>Nenhuma pendência detectada. Kit íntegro.</div>
         ) : (
           pendentes.map((x, idx) => (
-            <div
-              key={x.kit_item_id}
-              style={{
-                padding: "10px 12px",
-                borderTop: idx === 0 ? "none" : "1px solid #f1f1f1",
-              }}
-            >
-              <div style={{ fontWeight: 800 }}>{x.patrimonio}</div>
-              <div style={{ fontSize: 12, opacity: 0.85 }}>{x.descricao}</div>
-            </div>
-          ))
-        )}
-      </div>
-    </CardShell>
-  );
-}
-
-function DevolucoesCard({ selectedKitId, kitLabel, distributedItems, onRequestDevolucao }) {
-  const totalDistribuidos = distributedItems?.length ?? 0;
-  return (
-    <CardShell
-      title="Devoluções"
-      subtitle="Você solicita. O admin encerra com PIN."
-      right={<Pill label="Distribuído" value={totalDistribuidos} />}
-    >
-      <button
-        onClick={() => onRequestDevolucao?.()}
-        disabled={!selectedKitId}
-        style={{
-          borderRadius: 12,
-          padding: "12px 14px",
-          fontWeight: 900,
-          border: "1px solid #111",
-          background: selectedKitId ? "#fff" : "#999",
-          color: selectedKitId ? "#111" : "#555",
-          cursor: selectedKitId ? "pointer" : "not-allowed",
-        }}
-        title="Solicitar devolução do kit (fica pendente no admin até o PIN fechar o fluxo)"
-      >
-        Solicitar devolução do kit
-      </button>
-
-      <div style={{ fontSize: 12, opacity: 0.7 }}>
-        Kit atual: <b>{kitLabel || selectedKitId || "—"}</b>
-      </div>
-
-      <div style={{ maxHeight: 220, overflow: "auto", border: "1px solid #eee", borderRadius: 12 }}>
-        {totalDistribuidos === 0 ? (
-          <div style={{ padding: 12, fontSize: 12, opacity: 0.75 }}>
-            Nenhum item marcado como distribuído neste kit.
-          </div>
-        ) : (
-          distributedItems.map((x, idx) => (
             <div
               key={x.kit_item_id}
               style={{
@@ -920,59 +810,69 @@ function DetalhesKitCard({
                   <div style={{ marginTop: 4 }}>{renderStatus(st)}</div>
                 </div>
 
-                <div style={{ display: "flex", gap: 8, flexWrap: "wrap", justifyContent: "flex-end", alignItems: "center" }}>
-                  <button
-                    onClick={() => onSolicitarSubstituicao?.(x)}
-                    disabled={!selectedKitId}
+                {!readOnly && (
+                  <div
                     style={{
-                      padding: "8px 10px",
-                      borderRadius: 10,
-                      border: "1px solid #111",
-                      background: "#fff",
-                      cursor: selectedKitId ? "pointer" : "not-allowed",
-                      fontWeight: 900,
+                      display: "flex",
+                      gap: 8,
+                      flexWrap: "wrap",
+                      justifyContent: "flex-end",
+                      alignItems: "center",
                     }}
                   >
-                    Solicitar substituição
-                  </button>
-
-                  {isDistrib ? (
                     <button
-                      onClick={() => onReagrupar?.(x)}
+                      onClick={() => onSolicitarSubstituicao?.(x)}
+                      disabled={!selectedKitId}
                       style={{
                         padding: "8px 10px",
                         borderRadius: 10,
                         border: "1px solid #111",
-                        background: "#111",
-                        color: "#fff",
-                        cursor: "pointer",
+                        background: "#fff",
+                        cursor: selectedKitId ? "pointer" : "not-allowed",
                         fontWeight: 900,
                       }}
-                      title="Reagrupar item distribuído ao kit"
                     >
-                      Reagrupar
+                      Solicitar substituição
                     </button>
-                  ) : (
-                    <button
-                      onClick={() => onPickSubresponsavel?.(x.kit_item_id, { id: null, nome: "" }, true)}
-                      disabled={!selectedKitId || !selectedEncarregadoId}
-                      style={{
-                        padding: "8px 10px",
-                        borderRadius: 10,
-                        border: "1px solid #111",
-                        background: "#111",
-                        color: "#fff",
-                        cursor: !selectedKitId || !selectedEncarregadoId ? "not-allowed" : "pointer",
-                        fontWeight: 900,
-                      }}
-                      title="Preparar distribuição (seleciona subresponsável + PIN)"
-                    >
-                      Distribuir
-                    </button>
-                  )}
-                </div>
 
-                {isDistrib ? (
+                    {isDistrib ? (
+                      <button
+                        onClick={() => onReagrupar?.(x)}
+                        style={{
+                          padding: "8px 10px",
+                          borderRadius: 10,
+                          border: "1px solid #111",
+                          background: "#111",
+                          color: "#fff",
+                          cursor: "pointer",
+                          fontWeight: 900,
+                        }}
+                        title="Reagrupar item distribuído ao kit"
+                      >
+                        Reagrupar
+                      </button>
+                    ) : (
+                      <button
+                        onClick={() => onPickSubresponsavel?.(x.kit_item_id, { id: null, nome: "" }, true)}
+                        disabled={!selectedKitId || !selectedEncarregadoId}
+                        style={{
+                          padding: "8px 10px",
+                          borderRadius: 10,
+                          border: "1px solid #111",
+                          background: "#111",
+                          color: "#fff",
+                          cursor: !selectedKitId || !selectedEncarregadoId ? "not-allowed" : "pointer",
+                          fontWeight: 900,
+                        }}
+                        title="Preparar distribuição (seleciona subresponsável + PIN)"
+                      >
+                        Distribuir
+                      </button>
+                    )}
+                  </div>
+                )}
+
+                {!readOnly && isDistrib ? (
                   <div style={{ marginTop: 4 }}>
                     <SubresponsavelPicker
                       kitId={selectedKitId}
@@ -1050,6 +950,8 @@ export default function App() {
    */
   const [selectedKitId, setSelectedKitId] = useState("");
   const [selectedEncarregadoId, setSelectedEncarregadoId] = useState("");
+  const [operationalKitId, setOperationalKitId] = useState("");
+  const [operationalKitLabel, setOperationalKitLabel] = useState("");
 
   /**
    * Itens do kit (detalhados) e busca
@@ -1075,7 +977,7 @@ export default function App() {
   const [substModalItem, setSubstModalItem] = useState(null);
   const [substSubmitting, setSubstSubmitting] = useState(false);
   const [substObservacao, setSubstObservacao] = useState("");
-  const detalhesRef = useRef(null);
+  const operationRef = useRef(null);
 
   /**
    * =========================================================
@@ -1111,11 +1013,24 @@ export default function App() {
   const showDetalhesKit = hasKitSelected && hasKitPosse;
   const kitLabelDisplay = kitLabel || (selectedKitId ? `Kit #${selectedKitId}` : "—");
   const focusDetalhes = () => {
-    detalhesRef.current?.scrollIntoView({
+    operationRef.current?.scrollIntoView({
       behavior: "smooth",
       block: "start",
     });
   };
+  const handleOpenOperational = () => {
+    if (!selectedKitId || !hasKitPosse) return;
+    setOperationalKitId(selectedKitId);
+    setOperationalKitLabel(kitLabelDisplay);
+  };
+  const operationalKitItens = useMemo(() => (operationalKitId ? kitItens : []), [operationalKitId, kitItens]);
+  const showOperationalPanel = Boolean(operationalKitId) && hasKitPosse;
+
+  useEffect(() => {
+    if (operationalKitId) {
+      focusDetalhes();
+    }
+  }, [operationalKitId]);
 
   function toast(msg) {
     setUiMsg(msg);
@@ -2921,8 +2836,6 @@ export default function App() {
         </div>
       </div>
 
-      <AvulsosPanel avulsos={avulsos} onSolicitarAvulso={handleSolicitarAvulso} />
-
       <div
         style={{
           display: "grid",
@@ -2932,21 +2845,50 @@ export default function App() {
           alignItems: "stretch",
         }}
       >
-        <SolicitacoesCard
-          totals={totals}
-          items={filtered}
-          statusMap={statusMap}
-          selectedKitId={selectedKitId}
-          canSubmit={canSubmit}
-          submitting={submitting}
-          onSubmitChecklist={openChecklistTermo}
-        />
-        <DevolucoesCard
-          kitLabel={kitLabel}
-          selectedKitId={selectedKitId}
-          distributedItems={distributedItems}
-          onRequestDevolucao={handleRequestDevolucao}
-        />
+        <div>
+          <SolicitacoesCard
+            totals={totals}
+            items={filtered}
+            statusMap={statusMap}
+            selectedKitId={selectedKitId}
+            canSubmit={canSubmit}
+            submitting={submitting}
+            onSubmitChecklist={openChecklistTermo}
+          />
+        </div>
+        <div
+          style={{
+            border: "1px solid rgba(255,255,255,0.15)",
+            borderRadius: 14,
+            padding: 16,
+            background: "rgba(0,0,0,0.22)",
+            minHeight: 320,
+            display: "flex",
+            flexDirection: "column",
+            gap: 12,
+          }}
+        >
+          <div style={{ fontWeight: 700 }}>Detalhes do kit (preview)</div>
+          {selectedKitId ? (
+            <DetalhesKitCard
+              items={kitItens}
+              statusMap={statusMap}
+              geo={geo}
+              selectedKitId={selectedKitId}
+              kitLabel={kitLabel}
+              selectedEncarregadoId={selectedEncarregadoId}
+              onSolicitarSubstituicao={handleSolicitarSubstituicao}
+              onReagrupar={handleReagruparItem}
+              onPickSubresponsavel={handleSubresponsavelPick}
+              onConfirmDistribuicao={markDistribConfirmado}
+              readOnly
+            />
+          ) : (
+            <div style={{ padding: 10, fontSize: 12, opacity: 0.65 }}>
+              Pré-visualização do kit selecionado. Operações aparecem apenas em “Meus kits cautelados”.
+            </div>
+          )}
+        </div>
       </div>
 
       {hasKitPosse && (
@@ -2955,15 +2897,15 @@ export default function App() {
             border: "1px solid rgba(255,255,255,0.15)",
             borderRadius: 14,
             padding: 16,
-            marginTop: 12,
-            background: "rgba(0,0,0,0.25)",
+            marginTop: 16,
+            background: "rgba(0,0,0,0.28)",
           }}
         >
           <div style={{ fontWeight: 700, marginBottom: 4 }}>Meus kits cautelados</div>
           <div style={{ marginBottom: 10, fontSize: 12, opacity: 0.8 }}>{kitLabelDisplay}</div>
           <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
             <button
-              onClick={focusDetalhes}
+              onClick={handleOpenOperational}
               style={{
                 padding: "8px 12px",
                 borderRadius: 10,
@@ -2994,42 +2936,32 @@ export default function App() {
         </div>
       )}
 
-      <div ref={detalhesRef}>
-        {showDetalhesKit ? (
-          <>
-            <DetalhesKitCard
-              items={kitItens}
-              statusMap={statusMap}
-              geo={geo}
-              selectedKitId={selectedKitId}
-              kitLabel={kitLabel}
-              selectedEncarregadoId={selectedEncarregadoId}
-              onSolicitarSubstituicao={handleSolicitarSubstituicao}
-              onReagrupar={handleReagruparItem}
-              onPickSubresponsavel={handleSubresponsavelPick}
-              onConfirmDistribuicao={markDistribConfirmado}
-            />
-
-            <div style={{ marginTop: 14, fontSize: 12, opacity: 0.75 }}>
-              Regra: checklist confirma o kit completo e mantém o histórico dos itens distribuídos; devoluções
-              e substituições só são fechadas pelo admin com PIN.
-            </div>
-          </>
-        ) : (
-          <div
-            style={{
-              border: "1px dashed rgba(0,0,0,.3)",
-              borderRadius: 12,
-              padding: 16,
-              marginTop: 12,
-              fontSize: 13,
-              opacity: 0.75,
-            }}
-          >
-            Você ainda não tem kit cautelado. Solicite acima para liberar operações.
-          </div>
-        )}
-      </div>
+      {showOperationalPanel && (
+        <div
+          ref={operationRef}
+          style={{
+            marginTop: 16,
+            border: "1px solid rgba(255,255,255,0.15)",
+            borderRadius: 14,
+            padding: 16,
+            background: "rgba(0,0,0,0.25)",
+          }}
+        >
+          <div style={{ fontWeight: 700, marginBottom: 10 }}>Operação do kit</div>
+          <DetalhesKitCard
+            items={operationalKitItens}
+            statusMap={statusMap}
+            geo={geo}
+            selectedKitId={operationalKitId}
+            kitLabel={operationalKitLabel}
+            selectedEncarregadoId={selectedEncarregadoId}
+            onSolicitarSubstituicao={handleSolicitarSubstituicao}
+            onReagrupar={handleReagruparItem}
+            onPickSubresponsavel={handleSubresponsavelPick}
+            onConfirmDistribuicao={markDistribConfirmado}
+          />
+        </div>
+      )}
 
       {substModalItem && (
         <div
