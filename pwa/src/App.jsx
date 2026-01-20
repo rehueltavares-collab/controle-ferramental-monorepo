@@ -1098,6 +1098,13 @@ export default function App() {
     return (kitItens ?? []).filter((x) => statusMap?.[x.kit_item_id]?.status === "DISTRIBUIDO");
   }, [kitItens, statusMap]);
 
+  const kitLabel = useMemo(() => {
+    const k = kits.find((x) => String(x.id) === String(selectedKitId));
+    if (!k) return "";
+    const setor = setores.find((s) => s.id === k.setor_id)?.nome ?? `Setor ${k.setor_id}`;
+    return `${k.nome} • ${setor} • ${k.tipo ?? ""}`.trim();
+  }, [kits, setores, selectedKitId]);
+
   const hasKitSelected = Boolean(selectedKitId);
   const hasKitPosse =
     (manualItens?.length ?? 0) > 0 || (distributedItems?.length ?? 0) > 0;
@@ -1512,18 +1519,6 @@ export default function App() {
       }
     })();
   }, [selectedKitId]);
-
-  /**
-   * =========================================================
-   * Label do kit
-   * =========================================================
-   */
-  const kitLabel = useMemo(() => {
-    const k = kits.find((x) => String(x.id) === String(selectedKitId));
-    if (!k) return "";
-    const setor = setores.find((s) => s.id === k.setor_id)?.nome ?? `Setor ${k.setor_id}`;
-    return `${k.nome} • ${setor} • ${k.tipo ?? ""}`.trim();
-  }, [kits, setores, selectedKitId]);
 
   /**
    * =========================================================
