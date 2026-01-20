@@ -2373,37 +2373,156 @@ export default function App() {
             </div>
           </div>
 
-          {adminTrail ? (
-            <div style={{ border: "1px solid #ddd", borderRadius: 12, padding: 10, marginTop: 12 }}>
-              <div style={{ fontWeight: 800, marginBottom: 6 }}>{adminTrailTitle}</div>
-              <div style={{ display: "grid", gap: 10, gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))" }}>
-                {adminTrail.checklists ? (
+            {adminTrail && (
+              <div className="admin-trail-shell">
+                <div className="admin-trail-header">
                   <div>
-                    <div style={{ fontWeight: 700, marginBottom: 4 }}>Checklists</div>
-                    <pre style={{ fontSize: 11, whiteSpace: "pre-wrap", margin: 0 }}>{JSON.stringify(adminTrail.checklists, null, 2)}</pre>
+                    <div className="trail-title">Trilha</div>
+                    <div className="trail-subtitle muted">
+                      {adminTrailTitle || "—"} • Última atualização: {formatDateTime(adminTrailLastUpdate)}
+                    </div>
                   </div>
-                ) : null}
-                {adminTrail.termos ? (
-                  <div>
-                    <div style={{ fontWeight: 700, marginBottom: 4 }}>Termos</div>
-                    <pre style={{ fontSize: 11, whiteSpace: "pre-wrap", margin: 0 }}>{JSON.stringify(adminTrail.termos, null, 2)}</pre>
+
+                  <div className="trail-actions">
+                    <button
+                      type="button"
+                      className="btn-secondary"
+                      onClick={() => setAdminTrailShowTech((v) => !v)}
+                    >
+                      {adminTrailShowTech ? "Ocultar técnico" : "Ver técnico"}
+                    </button>
                   </div>
-                ) : null}
-                {adminTrail.movimentos ? (
-                  <div>
-                    <div style={{ fontWeight: 700, marginBottom: 4 }}>Movimentos</div>
-                    <pre style={{ fontSize: 11, whiteSpace: "pre-wrap", margin: 0 }}>{JSON.stringify(adminTrail.movimentos, null, 2)}</pre>
+                </div>
+
+                <div className="admin-trail-grid-top">
+                  <div className="trail-card">
+                    <div className="trail-card-title">Checklist</div>
+                    <div className="trail-card-body">
+                      {adminTrailChecklists.length ? (
+                        adminTrailChecklists.slice(0, 3).map((c) => (
+                          <div key={c.id || c.data_hora} className="trail-item">
+                            <div>
+                              <strong>Quando:</strong> {formatDateTime(c.data_hora)}
+                            </div>
+                            <div>
+                              <strong>Kit:</strong> {c.kit_nome || c.kit_id || "—"}
+                            </div>
+                            <div>
+                              <strong>Patrimônios:</strong> {c.patrimonios_declarados || "—"}
+                            </div>
+                          </div>
+                        ))
+                      ) : (
+                        <div className="muted">Nenhum checklist nesta trilha.</div>
+                      )}
+                    </div>
                   </div>
-                ) : null}
-                {adminTrail.item_movimentos ? (
-                  <div>
-                    <div style={{ fontWeight: 700, marginBottom: 4 }}>Item Movimentos</div>
-                    <pre style={{ fontSize: 11, whiteSpace: "pre-wrap", margin: 0 }}>{JSON.stringify(adminTrail.item_movimentos, null, 2)}</pre>
+
+                  <div className="trail-card trail-termos-wide">
+                    <div className="trail-card-title">
+                      <span>Termos</span>
+                      {adminTrailOldTerms.length > 0 && (
+                        <button
+                          type="button"
+                          className="link-btn"
+                          onClick={() => setAdminTermsShowHistory((v) => !v)}
+                        >
+                          {adminTermsShowHistory
+                            ? "Ocultar histórico"
+                            : `Ver histórico (${adminTrailOldTerms.length})`}
+                        </button>
+                      )}
+                    </div>
+
+                    <div className="trail-card-body">
+                      {adminTrailLastTerm ? (
+                        <>
+                          <div className="trail-item">
+                            <div>
+                              <strong>Último termo:</strong>{" "}
+                              {adminTrailLastTerm.tipo || adminTrailLastTerm.status || "—"}
+                            </div>
+                            <div>
+                              <strong>Assinante:</strong>{" "}
+                              {adminTrailLastTerm.assinatura_nome || adminTrailLastTerm.nome || "—"}
+                            </div>
+                            <div>
+                              <strong>Data:</strong>{" "}
+                              {formatDateTime(adminTrailLastTerm.criado_em || adminTrailLastTerm.created_at)}
+                            </div>
+                          </div>
+
+                          <div className="trail-termo-text">
+                            {adminTrailLastTerm.texto_termo || adminTrailLastTerm.texto || "—"}
+                          </div>
+
+                          {adminTermsShowHistory && (
+                            <div className="trail-history">
+                              {adminTrailOldTerms.map((t) => (
+                                <div key={t.id || t.criado_em} className="trail-item">
+                                  <div>
+                                    <strong>{t.tipo || t.status || "Termo"}</strong>
+                                  </div>
+                                  <div className="muted">{formatDateTime(t.criado_em || t.created_at)}</div>
+                                </div>
+                              ))}
+                            </div>
+                          )}
+                        </>
+                      ) : (
+                        <div className="muted">
+                          Sem termo registrado: não houve cautela assinada neste registro.
+                        </div>
+                      )}
+                    </div>
                   </div>
-                ) : null}
+                </div>
+
+                <div className="trail-card-wide">
+                  <div className="trail-card-title">Movimentos</div>
+                  <div className="trail-card-body">
+                    {adminTrailMovements.length ? (
+                      <div className="trail-table-wrapper">
+                        <table className="admin-trail-table">
+                          <thead>
+                            <tr>
+                              <th>Ação</th>
+                              <th>Item</th>
+                              <th>Qtde</th>
+                              <th>Registrado por</th>
+                              <th>PIN</th>
+                              <th>Data</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {adminTrailMovements.map((m) => (
+                              <tr key={m.id || `${m.acao}-${m.data_hora}`}>
+                                <td>{m.acao || m.tipo || "—"}</td>
+                                <td>{m.patrimonio || m.item_patrimonio || "—"}</td>
+                                <td>{m.quantidade ?? "—"}</td>
+                                <td>
+                                  {m.registrado_por_nome || m.encarregado_nome || m.registrado_por || "—"}
+                                </td>
+                                <td>{m.subresponsavel_nome || (m.admin_pin_usado ? "Admin" : "—")}</td>
+                                <td>{formatDateTime(m.data_hora || m.created_at)}</td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    ) : (
+                      <div className="muted">Nenhum movimento nesta trilha.</div>
+                    )}
+                  </div>
+                </div>
+
+                {adminTrailShowTech && (
+                  <div className="trail-technical">
+                    <pre className="trail-raw">{JSON.stringify(adminTrail ?? {}, null, 2)}</pre>
+                  </div>
+                )}
               </div>
-            </div>
-          ) : null}
+            )}
         </div>
       )}
 
