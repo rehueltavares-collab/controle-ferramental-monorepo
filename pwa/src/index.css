@@ -221,3 +221,204 @@ button:focus-visible {
   overflow: auto;
   font-size: 12px;
 }
+
+/* ===== User panel – modo elétrico: contraste consistente ===== */
+.user-panel.mode-eletrico {
+  color: #eaeaea;
+}
+
+/* Cards que estão ficando "brancos lavados" no elétrico */
+.user-panel.mode-eletrico .card,
+.user-panel.mode-eletrico .panel,
+.user-panel.mode-eletrico .box,
+.user-panel.mode-eletrico .checklist-card,
+.user-panel.mode-eletrico .card-white,
+.user-panel.mode-eletrico .bg-white,
+.user-panel.mode-eletrico .surface {
+  background: #141414 !important;
+  color: #eaeaea !important;
+  border-color: rgba(255,255,255,0.10) !important;
+}
+
+/* Títulos e textos “muted” que estavam sumindo */
+.user-panel.mode-eletrico .muted,
+.user-panel.mode-eletrico .hint,
+.user-panel.mode-eletrico small,
+.user-panel.mode-eletrico .subtitle {
+  color: rgba(234,234,234,0.70) !important;
+  opacity: 1 !important;
+}
+
+/* Inputs e selects */
+.user-panel.mode-eletrico input,
+.user-panel.mode-eletrico select,
+.user-panel.mode-eletrico textarea {
+  background: #0f0f0f !important;
+  color: #f5f5f5 !important;
+  border: 1px solid rgba(255,255,255,0.18) !important;
+}
+
+/* Placeholder visível */
+.user-panel.mode-eletrico input::placeholder,
+.user-panel.mode-eletrico textarea::placeholder {
+  color: rgba(245,245,245,0.55) !important;
+  opacity: 1 !important;
+}
+
+/* Focus com cara de “tá selecionado” */
+.user-panel.mode-eletrico input:focus,
+.user-panel.mode-eletrico select:focus,
+.user-panel.mode-eletrico textarea:focus {
+  outline: none !important;
+  border-color: rgba(255,255,255,0.40) !important;
+  box-shadow: 0 0 0 3px rgba(255,255,255,0.10) !important;
+}
+
+/* Botões */
+.user-panel.mode-eletrico button,
+.user-panel.mode-eletrico .btn,
+.user-panel.mode-eletrico .btn-primary {
+  background: #1b1b1b !important;
+  color: #ffffff !important;
+  border: 1px solid rgba(255,255,255,0.18) !important;
+}
+
+.user-panel.mode-eletrico button:disabled,
+.user-panel.mode-eletrico .btn:disabled {
+  opacity: 0.55 !important;
+  cursor: not-allowed !important;
+}
+
+/* ===== Admin: Trilha (layout estável) ===== */
+.admin-trail-shell{
+  margin-top: 14px;
+  border: 1px solid rgba(255,255,255,.12);
+  border-radius: 16px;
+  padding: 14px;
+  background: rgba(0,0,0,.22);
+}
+
+.admin-trail-header{
+  display:flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 10px;
+}
+
+.trail-title{ font-weight: 700; font-size: 16px; }
+.trail-subtitle{ font-size: 12px; }
+
+/* Topo: checklist + termos */
+.admin-trail-grid-top{
+  display: grid;
+  grid-template-columns: 320px 1fr;
+  gap: 12px;
+  align-items: stretch;
+}
+
+.trail-card{
+  border: 1px solid rgba(255,255,255,.10);
+  border-radius: 14px;
+  padding: 12px;
+  background: rgba(0,0,0,.25);
+  height: 320px;                /* trava altura */
+  display:flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.trail-termos-wide{
+  min-width: 0;                 /* impede empurrar pro lado */
+}
+
+.trail-card-title{
+  display:flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 10px;
+  font-weight: 700;
+}
+
+.trail-card-body{
+  margin-top: 8px;
+  overflow: auto;               /* scroll interno */
+  flex: 1;
+  min-height: 0;
+  padding-right: 6px;
+}
+
+.trail-termo-text{
+  margin-top: 10px;
+  white-space: pre-wrap;
+  line-height: 1.35;
+}
+
+.trail-history{
+  margin-top: 10px;
+  border-top: 1px solid rgba(255,255,255,.10);
+  padding-top: 10px;
+  display: grid;
+  gap: 8px;
+}
+
+.trail-item{
+  border: 1px solid rgba(255,255,255,.08);
+  border-radius: 12px;
+  padding: 10px;
+  background: rgba(0,0,0,.18);
+}
+
+/* Movimentos: full width com altura fixa */
+.trail-card-wide{
+  margin-top: 12px;
+  border: 1px solid rgba(255,255,255,.10);
+  border-radius: 14px;
+  padding: 12px;
+  background: rgba(0,0,0,.25);
+  height: 240px;                /* trava altura */
+  display:flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.trail-table-wrapper{
+  overflow-x: auto;             /* scroll horizontal se precisar */
+}
+
+.admin-trail-table{
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+}
+
+.admin-trail-table th,
+.admin-trail-table td{
+  padding: 8px 10px;
+  border-bottom: 1px solid rgba(255,255,255,.08);
+  text-align: left;
+  vertical-align: top;
+}
+
+.link-btn{
+  background: transparent;
+  border: none;
+  padding: 0;
+  color: inherit;
+  opacity: .85;
+  cursor: pointer;
+  text-decoration: underline;
+}
+
+/* Técnico */
+.trail-technical{
+  margin-top: 12px;
+  border-top: 1px solid rgba(255,255,255,.10);
+  padding-top: 12px;
+}
+
+.trail-raw{
+  max-height: 320px;
+  overflow: auto;
+  font-size: 12px;
+}
