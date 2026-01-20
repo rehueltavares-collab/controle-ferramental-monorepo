@@ -2134,7 +2134,10 @@ export default function App() {
 
 
   return (
-    <div style={{ padding: 16, fontFamily: "system-ui", maxWidth: 1200, margin: "0 auto" }}>
+    <div
+      className={`user-panel ${modo === "eletrico" ? "mode-eletrico" : "mode-manual"}`}
+      style={{ padding: 16, fontFamily: "system-ui", maxWidth: 1200, margin: "0 auto" }}
+    >
       <h2 style={{ marginBottom: 6 }}>Checklist Semanal • Ferramental</h2>
 
       <div style={{ opacity: 0.8, marginBottom: 12, fontSize: 13 }}>
