@@ -26,8 +26,9 @@ def utc_now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
+# noqa: E501
 class DistribuirBody(BaseModel):
-    kit_id: int
+    kit_id: Optional[int] = None
     patrimonio: str = Field(min_length=1)
     encarregado_id: int
     subresponsavel_id: int
@@ -41,7 +42,7 @@ class DistribuirBody(BaseModel):
 
 
 class RecolherBody(BaseModel):
-    kit_id: int
+    kit_id: Optional[int] = None
     patrimonio: str = Field(min_length=1)
     encarregado_id: int
 
@@ -105,6 +106,8 @@ def distribuir_item(body: DistribuirBody, db: Session = Depends(get_db)):
     created_at = utc_now_iso()
     gps_ts = body.gps_timestamp or created_at
 
+    kit_id = body.kit_id if body.kit_id is not None else None
+
     db.execute(
         text(
             """
@@ -117,7 +120,7 @@ def distribuir_item(body: DistribuirBody, db: Session = Depends(get_db)):
             """
         ),
         {
-            "kit_id": int(body.kit_id),
+            "kit_id": kit_id,
             "enc_id": int(body.encarregado_id),
             "item_id": int(item_id),
             "sub_id": int(body.subresponsavel_id),
@@ -139,7 +142,7 @@ def distribuir_item(body: DistribuirBody, db: Session = Depends(get_db)):
             """
         ),
         {
-            "kit_id": int(body.kit_id),
+            "kit_id": kit_id,
             "patrimonio": body.patrimonio.strip(),
             "enc_id": int(body.encarregado_id),
             "sub_id": int(body.subresponsavel_id),
@@ -152,7 +155,7 @@ def distribuir_item(body: DistribuirBody, db: Session = Depends(get_db)):
     return {
         "status": "ok",
         "tipo": "DISTRIBUIR",
-        "kit_id": body.kit_id,
+        "kit_id": kit_id,
         "patrimonio": body.patrimonio,
         "encarregado_id": body.encarregado_id,
         "subresponsavel_id": body.subresponsavel_id,
@@ -174,6 +177,8 @@ def recolher_item(body: RecolherBody, db: Session = Depends(get_db)):
     created_at = utc_now_iso()
     gps_ts = body.gps_timestamp or created_at
 
+    kit_id = body.kit_id if body.kit_id is not None else None
+
     db.execute(
         text(
             """
@@ -186,7 +191,7 @@ def recolher_item(body: RecolherBody, db: Session = Depends(get_db)):
             """
         ),
         {
-            "kit_id": int(body.kit_id),
+            "kit_id": kit_id,
             "enc_id": int(body.encarregado_id),
             "item_id": int(item_id),
             "lat": float(body.lat or 0),
@@ -207,7 +212,7 @@ def recolher_item(body: RecolherBody, db: Session = Depends(get_db)):
             """
         ),
         {
-            "kit_id": int(body.kit_id),
+            "kit_id": kit_id,
             "patrimonio": body.patrimonio.strip(),
             "enc_id": int(body.encarregado_id),
             "obs": (body.observacao or "").strip() or None,
@@ -219,7 +224,7 @@ def recolher_item(body: RecolherBody, db: Session = Depends(get_db)):
     return {
         "status": "ok",
         "tipo": "RECOLHER",
-        "kit_id": body.kit_id,
+        "kit_id": kit_id,
         "patrimonio": body.patrimonio,
         "encarregado_id": body.encarregado_id,
         "lat": float(body.lat or 0),

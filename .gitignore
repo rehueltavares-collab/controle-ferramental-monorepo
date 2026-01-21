@@ -42,3 +42,7 @@ pwa/.env.*
 # temporários / debug
 *hash*.txt
 temp-*.json
+# backend local artifacts
+backend/out/
+backend/body_*.json
+
