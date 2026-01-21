@@ -674,7 +674,7 @@ function Pill({ label, value }) {
   );
 }
 
-function SolicitacoesCard({ totals, items, statusMap, selectedKitId, canSubmit, submitting, onSubmitChecklist }) {
+function SolicitacoesCard({ totals, items, statusMap, selectedKitId }) {
   const pendentes = useMemo(() => {
     if (!selectedKitId) return [];
     return (items ?? []).filter((x) => {
@@ -685,8 +685,8 @@ function SolicitacoesCard({ totals, items, statusMap, selectedKitId, canSubmit, 
 
   return (
     <CardShell
-      title="Solicitações"
-      subtitle="Checklist semanal: confirma o kit e gera termo."
+      title="Checklist semanal / Status"
+      subtitle="Painel situacional: leitura apenas, sem CTAs."
       right={
         <div style={{ display: "flex", gap: 8, flexWrap: "wrap", justifyContent: "flex-end" }}>
           <Pill label="Total" value={totals?.total} />
@@ -696,24 +696,9 @@ function SolicitacoesCard({ totals, items, statusMap, selectedKitId, canSubmit, 
         </div>
       }
     >
-      <button
-        onClick={onSubmitChecklist}
-        disabled={!selectedKitId || !canSubmit || submitting}
-        style={{
-          borderRadius: 12,
-          padding: "12px 14px",
-          fontWeight: 900,
-          border: "1px solid #111",
-          background: !selectedKitId || !canSubmit ? "#999" : "#111",
-          color: "#fff",
-          cursor: !selectedKitId || !canSubmit || submitting ? "not-allowed" : "pointer",
-        }}
-        title={canSubmit ? "Assinar termo e enviar checklist" : "Kit precisa estar completo e distribuído para enviar checklist."}
-      >
-        {submitting ? "Enviando..." : "Enviar Checklist (com termo)"}
-      </button>
-
-      <div style={{ fontSize: 12, opacity: 0.8 }}>Pendências locais (kit precisa estar íntegro para liberar o termo):</div>
+      <div style={{ fontSize: 12, opacity: 0.8 }}>
+        Pendências locais (kit precisa estar íntegro para liberar o termo):
+      </div>
 
       <div style={{ maxHeight: 220, overflow: "auto", border: "1px solid #eee", borderRadius: 12 }}>
         {!selectedKitId ? (
@@ -750,6 +735,7 @@ function DetalhesKitCard({
   onConfirmDistribuicao,
   onReagrupar,
   onSolicitarSubstituicao,
+  readOnly = false,
 }) {
   const renderStatus = (st) => {
     if (st?.status === "DISTRIBUIDO") {
@@ -950,8 +936,6 @@ export default function App() {
    */
   const [selectedKitId, setSelectedKitId] = useState("");
   const [selectedEncarregadoId, setSelectedEncarregadoId] = useState("");
-  const [operationalKitId, setOperationalKitId] = useState("");
-  const [operationalKitLabel, setOperationalKitLabel] = useState("");
 
   /**
    * Itens do kit (detalhados) e busca
@@ -977,7 +961,9 @@ export default function App() {
   const [substModalItem, setSubstModalItem] = useState(null);
   const [substSubmitting, setSubstSubmitting] = useState(false);
   const [substObservacao, setSubstObservacao] = useState("");
-  const operationRef = useRef(null);
+  const [selecionado, setSelecionado] = useState(null);
+  const [tabMeus, setTabMeus] = useState("kits");
+  const [selectedAvulsoId, setSelectedAvulsoId] = useState("");
 
   /**
    * =========================================================
@@ -1004,33 +990,49 @@ export default function App() {
     const k = kits.find((x) => String(x.id) === String(selectedKitId));
     if (!k) return "";
     const setor = setores.find((s) => s.id === k.setor_id)?.nome ?? `Setor ${k.setor_id}`;
-    return `${k.nome} • ${setor} • ${k.tipo ?? ""}`.trim();
+    const parts = [k.nome, setor];
+    if (k.tipo) parts.push(k.tipo);
+    return parts.filter(Boolean).join(" • ");
   }, [kits, setores, selectedKitId]);
 
-  const hasKitSelected = Boolean(selectedKitId);
-  const hasKitPosse =
-    (manualItens?.length ?? 0) > 0 || (distributedItems?.length ?? 0) > 0;
-  const showDetalhesKit = hasKitSelected && hasKitPosse;
-  const kitLabelDisplay = kitLabel || (selectedKitId ? `Kit #${selectedKitId}` : "—");
-  const focusDetalhes = () => {
-    operationRef.current?.scrollIntoView({
-      behavior: "smooth",
-      block: "start",
-    });
+  const formatKitLabel = (kit) => {
+    if (!kit) return "-";
+    const setor = setores.find((s) => s.id === kit.setor_id)?.nome ?? `Setor ${kit.setor_id}`;
+    const parts = [kit.nome, setor];
+    if (kit.tipo) parts.push(kit.tipo);
+    return parts.filter(Boolean).join(" • ");
   };
-  const handleOpenOperational = () => {
-    if (!selectedKitId || !hasKitPosse) return;
-    setOperationalKitId(selectedKitId);
-    setOperationalKitLabel(kitLabelDisplay);
+
+  const kitEmPosse = kits.find((x) => String(x.id) === String(selectedKitId));
+  const meusKits = kitEmPosse ? [kitEmPosse] : [];
+  const meusItensEmPosse = manualItens ?? [];
+  const kitsDisponiveis = kits ?? [];
+  const avulsosDisponiveis = avulsos ?? [];
+  const MEUS_CAUTE_MAX_HEIGHT = 10 * 56;
+  const meusListStyle = {
+    borderTop: "1px solid rgba(255,255,255,0.08)",
+    paddingTop: 12,
+    paddingRight: 8,
+    display: "flex",
+    flexDirection: "column",
+    gap: 10,
+    maxHeight: MEUS_CAUTE_MAX_HEIGHT,
+    overflowY: "auto",
+    scrollbarGutter: "stable",
   };
-  const operationalKitItens = useMemo(() => (operationalKitId ? kitItens : []), [operationalKitId, kitItens]);
-  const showOperationalPanel = Boolean(operationalKitId) && hasKitPosse;
 
   useEffect(() => {
-    if (operationalKitId) {
-      focusDetalhes();
+    if (!selectedKitId) {
+      setSelecionado((prev) => (prev?.tipo === "kit" ? null : prev));
+      return;
     }
-  }, [operationalKitId]);
+    const kit = kits.find((x) => String(x.id) === String(selectedKitId));
+    if (!kit) return;
+    setSelecionado((prev) => {
+      if (prev?.tipo === "kit" && String(prev.data?.id) === String(kit.id)) return prev;
+      return { tipo: "kit", data: kit };
+    });
+  }, [selectedKitId, kits]);
 
   function toast(msg) {
     setUiMsg(msg);
@@ -2808,7 +2810,33 @@ export default function App() {
           {selectedKitId ? <div style={{ fontSize: 12, opacity: 0.75, marginTop: 6 }}>{kitLabel}</div> : null}
         </div>
 
-        
+        <div style={{ flex: 1, minWidth: 280 }}>
+          <label style={{ fontSize: 12, opacity: 0.85 }}>Avulso disponível</label>
+          <select
+            style={{ width: "100%", padding: 10 }}
+            value={selectedAvulsoId}
+            onChange={(e) => {
+              const id = e.target.value;
+              setSelectedAvulsoId(id);
+              if (!id) {
+                return;
+              }
+              const encontrado = (avulsosDisponiveis ?? []).find((a) => String(a.id) === String(id));
+              if (!encontrado) {
+                return;
+              }
+              setSelecionado({ tipo: "avulso", data: encontrado });
+            }}
+          >
+            <option value="">Selecione...</option>
+            {(avulsosDisponiveis ?? []).map((a) => (
+              <option key={a.id} value={a.id}>
+                {a.patrimonio || a.codigo || a.id} — {a.descricao || a.nome || "Avulso"}
+              </option>
+            ))}
+          </select>
+        </div>
+
         <div style={{ minWidth: 320 }}>
           <label style={{ fontSize: 12, opacity: 0.85 }}>Encarregado/Supervisor</label>
           {canEletrico ? (
@@ -2831,18 +2859,15 @@ export default function App() {
             disabled={!selectedKitId || kitItens.length === 0}
           />
           <div style={{ fontSize: 12, opacity: 0.75, marginTop: 6 }}>
-            Dica: digite apenas o final do patrimônio (ex: “937”). Menos drama, mais controle.
+            Dica: digite apenas o final do patrimônio (ex: "937"). Menos drama, mais controle.
           </div>
         </div>
       </div>
-
       <div
         style={{
           display: "grid",
-          gridTemplateColumns: "repeat(auto-fit, minmax(320px, 1fr))",
           gap: 16,
           marginTop: 16,
-          alignItems: "stretch",
         }}
       >
         <div>
@@ -2851,10 +2876,106 @@ export default function App() {
             items={filtered}
             statusMap={statusMap}
             selectedKitId={selectedKitId}
-            canSubmit={canSubmit}
-            submitting={submitting}
-            onSubmitChecklist={openChecklistTermo}
           />
+        </div>
+        <div
+          style={{
+            border: "1px solid rgba(255,255,255,0.15)",
+            borderRadius: 14,
+            padding: 16,
+            background: "rgba(0,0,0,0.28)",
+            display: "flex",
+            flexDirection: "column",
+            gap: 12,
+          }}
+        >
+          <div style={{ fontWeight: 700 }}>Meus cautelados</div>
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+            <button
+              onClick={() => setTabMeus("kits")}
+              style={{
+                padding: "6px 12px",
+                borderRadius: 10,
+                border: tabMeus === "kits" ? "1px solid #111" : "1px solid rgba(255,255,255,0.4)",
+                background: tabMeus === "kits" ? "#111" : "transparent",
+                color: tabMeus === "kits" ? "#fff" : "#f0f0f0",
+                cursor: "pointer",
+                fontWeight: 700,
+              }}
+            >
+              Kits
+            </button>
+            <button
+              onClick={() => setTabMeus("avulsos")}
+              style={{
+                padding: "6px 12px",
+                borderRadius: 10,
+                border: tabMeus === "avulsos" ? "1px solid #111" : "1px solid rgba(255,255,255,0.4)",
+                background: tabMeus === "avulsos" ? "#111" : "transparent",
+                color: tabMeus === "avulsos" ? "#fff" : "#f0f0f0",
+                cursor: "pointer",
+                fontWeight: 700,
+              }}
+            >
+              Avulsos
+            </button>
+          </div>
+          <div style={meusListStyle}>
+            {tabMeus === "kits" ? (
+              meusKits.length ? (
+                meusKits.map((kit, idx) => (
+                  <div
+                    key={kit.id}
+                    onClick={() => {
+                      setSelectedKitId(String(kit.id));
+                      setSelecionado({ tipo: "kit", data: kit });
+                    }}
+                    style={{
+                      padding: "10px 12px",
+                      borderTop: idx === 0 ? "none" : "1px solid rgba(255,255,255,0.08)",
+                      borderRadius: 10,
+                      background: selectedKitId === String(kit.id) ? "rgba(255,255,255,0.08)" : "transparent",
+                      cursor: "pointer",
+                    }}
+                  >
+                    <div style={{ fontWeight: 800 }}>{kit.nome}</div>
+                    <div style={{ fontSize: 12, opacity: 0.7 }}>{formatKitLabel(kit)}</div>
+                  </div>
+                ))
+              ) : (
+                <div style={{ fontSize: 12, opacity: 0.7 }}>Sem kits em posse.</div>
+              )
+            ) : meusItensEmPosse.length ? (
+              <>
+                <div style={{ fontSize: 12, opacity: 0.65 }}>
+                  Avulsos (provisorio): itens atualmente em posse.
+                </div>
+                {meusItensEmPosse.map((avulso, idx) => (
+                  <div
+                    key={avulso.id ?? `${avulso.patrimonio}-${idx}`}
+                    onClick={() => setSelecionado({ tipo: "avulso", data: avulso })}
+                    style={{
+                      padding: "10px 12px",
+                      borderTop: idx === 0 ? "none" : "1px solid rgba(255,255,255,0.08)",
+                      borderRadius: 10,
+                      background:
+                        selecionado?.tipo === "avulso" && selecionado?.data?.id === avulso.id
+                          ? "rgba(255,255,255,0.08)"
+                          : "transparent",
+                      cursor: "pointer",
+                    }}
+                  >
+                    <div style={{ fontWeight: 800 }}>{avulso.nome || avulso.patrimonio}</div>
+                    <div style={{ fontSize: 12, opacity: 0.75 }}>
+                      {avulso.status || "Presente sob sua responsabilidade"}
+                    </div>
+                  </div>
+                ))}
+              </>
+            ) : (
+              <div style={{ fontSize: 12, opacity: 0.7 }}>Sem avulsos em posse.</div>
+            )}
+          </div>
         </div>
         <div
           style={{
@@ -2868,8 +2989,12 @@ export default function App() {
             gap: 12,
           }}
         >
-          <div style={{ fontWeight: 700 }}>Detalhes do kit (preview)</div>
-          {selectedKitId ? (
+          <div style={{ fontWeight: 700 }}>Detalhes (preview)</div>
+          {!selecionado ? (
+            <div style={{ padding: 10, fontSize: 12, opacity: 0.7 }}>
+              Selecione um kit ou avulso em "Meus cautelados" para ver detalhes e ações.
+            </div>
+          ) : selecionado.tipo === "kit" ? (
             <DetalhesKitCard
               items={kitItens}
               statusMap={statusMap}
@@ -2884,84 +3009,28 @@ export default function App() {
               readOnly
             />
           ) : (
-            <div style={{ padding: 10, fontSize: 12, opacity: 0.65 }}>
-              Pré-visualização do kit selecionado. Operações aparecem apenas em “Meus kits cautelados”.
+            <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+              <div style={{ fontWeight: 800 }}>{selecionado.data?.nome || selecionado.data?.patrimonio}</div>
+              <div style={{ fontSize: 12, opacity: 0.75 }}>{selecionado.data?.status || "Presente sob sua responsabilidade"}</div>
+              <button
+                onClick={() => handleSolicitarAvulso?.(selecionado.data)}
+                style={{
+                  alignSelf: "flex-start",
+                  padding: "8px 12px",
+                  borderRadius: 10,
+                  border: "1px solid #111",
+                  background: "#111",
+                  color: "#fff",
+                  cursor: "pointer",
+                  fontWeight: 700,
+                }}
+              >
+                Solicitar avulso
+              </button>
             </div>
           )}
         </div>
       </div>
-
-      {hasKitPosse && (
-        <div
-          style={{
-            border: "1px solid rgba(255,255,255,0.15)",
-            borderRadius: 14,
-            padding: 16,
-            marginTop: 16,
-            background: "rgba(0,0,0,0.28)",
-          }}
-        >
-          <div style={{ fontWeight: 700, marginBottom: 4 }}>Meus kits cautelados</div>
-          <div style={{ marginBottom: 10, fontSize: 12, opacity: 0.8 }}>{kitLabelDisplay}</div>
-          <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
-            <button
-              onClick={handleOpenOperational}
-              style={{
-                padding: "8px 12px",
-                borderRadius: 10,
-                border: "1px solid #111",
-                background: "#111",
-                color: "#fff",
-                cursor: "pointer",
-                fontWeight: 700,
-              }}
-            >
-              Detalhes
-            </button>
-            <button
-              onClick={handleRequestDevolucao}
-              style={{
-                padding: "8px 12px",
-                borderRadius: 10,
-                border: "1px solid rgba(255,255,255,0.4)",
-                background: "transparent",
-                color: "#f0f0f0",
-                cursor: "pointer",
-                fontWeight: 700,
-              }}
-            >
-              Devolver
-            </button>
-          </div>
-        </div>
-      )}
-
-      {showOperationalPanel && (
-        <div
-          ref={operationRef}
-          style={{
-            marginTop: 16,
-            border: "1px solid rgba(255,255,255,0.15)",
-            borderRadius: 14,
-            padding: 16,
-            background: "rgba(0,0,0,0.25)",
-          }}
-        >
-          <div style={{ fontWeight: 700, marginBottom: 10 }}>Operação do kit</div>
-          <DetalhesKitCard
-            items={operationalKitItens}
-            statusMap={statusMap}
-            geo={geo}
-            selectedKitId={operationalKitId}
-            kitLabel={operationalKitLabel}
-            selectedEncarregadoId={selectedEncarregadoId}
-            onSolicitarSubstituicao={handleSolicitarSubstituicao}
-            onReagrupar={handleReagruparItem}
-            onPickSubresponsavel={handleSubresponsavelPick}
-            onConfirmDistribuicao={markDistribConfirmado}
-          />
-        </div>
-      )}
 
       {substModalItem && (
         <div
