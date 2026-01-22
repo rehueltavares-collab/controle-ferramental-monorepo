@@ -1,5 +1,5 @@
 ﻿// pwa/src/App.jsx
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   apiGet,
   apiPost,
@@ -735,6 +735,7 @@ function DetalhesKitCard({
   onConfirmDistribuicao,
   onReagrupar,
   onSolicitarSubstituicao,
+  onSolicitarDevolucao,
   readOnly = false,
 }) {
   const renderStatus = (st) => {
@@ -754,15 +755,35 @@ function DetalhesKitCard({
     return <span style={{ fontSize: 12, opacity: 0.85 }}>Pendente</span>;
   };
 
+  const headerRight = (
+    <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 6 }}>
+      <div style={{ fontSize: 12, opacity: 0.7 }}>
+        Kit: <b>{kitLabel || selectedKitId || "-"}</b>
+      </div>
+      {onSolicitarDevolucao && !readOnly ? (
+        <button
+          onClick={onSolicitarDevolucao}
+          style={{
+            padding: "8px 12px",
+            borderRadius: 10,
+            border: "1px solid #b00020",
+            background: "#b00020",
+            color: "#fff",
+            fontWeight: 900,
+            cursor: "pointer",
+          }}
+        >
+          Solicitar devolução
+        </button>
+      ) : null}
+    </div>
+  );
+
   return (
     <CardShell
       title="Detalhes do kit"
       subtitle="Distribuição • Reagrupar • Solicitação de substituição."
-      right={
-        <div style={{ fontSize: 12, opacity: 0.7 }}>
-          Kit: <b>{kitLabel || selectedKitId || "—"}</b>
-        </div>
-      }
+      right={headerRight}
     >
       {!selectedKitId ? (
         <div style={{ padding: 10, fontSize: 12, opacity: 0.75 }}>Selecione um kit para operar.</div>
@@ -962,8 +983,12 @@ export default function App() {
   const [substSubmitting, setSubstSubmitting] = useState(false);
   const [substObservacao, setSubstObservacao] = useState("");
   const [selecionado, setSelecionado] = useState(null);
+  const [posseSelecionada, setPosseSelecionada] = useState(null);
   const [tabMeus, setTabMeus] = useState("kits");
   const [selectedAvulsoId, setSelectedAvulsoId] = useState("");
+  const [meusAvulsos, setMeusAvulsos] = useState([]);
+  const [posseKitItens, setPosseKitItens] = useState([]);
+  const [posseStatusMap, setPosseStatusMap] = useState({});
 
   /**
    * =========================================================
@@ -1005,7 +1030,7 @@ export default function App() {
 
   const kitEmPosse = kits.find((x) => String(x.id) === String(selectedKitId));
   const meusKits = kitEmPosse ? [kitEmPosse] : [];
-  const meusItensEmPosse = manualItens ?? [];
+  const meusAvulsosReais = meusAvulsos ?? [];
   const kitsDisponiveis = kits ?? [];
   const avulsosDisponiveis = avulsos ?? [];
   const MEUS_CAUTE_MAX_HEIGHT = 10 * 56;
@@ -1020,6 +1045,11 @@ export default function App() {
     overflowY: "auto",
     scrollbarGutter: "stable",
   };
+
+  const isKitPosseSelecionada = (kit) =>
+    posseSelecionada?.tipo === "kit" && String(posseSelecionada?.data?.id) === String(kit?.id);
+  const isAvulsoPosseSelecionada = (avulso) =>
+    posseSelecionada?.tipo === "avulso" && String(posseSelecionada?.data?.id) === String(avulso?.id);
 
   useEffect(() => {
     if (!selectedKitId) {
@@ -1132,6 +1162,33 @@ export default function App() {
       setSelectedEncarregadoId("");
     }
   }, [currentUser]);
+
+  useEffect(() => {
+    if (!apiBase) return;
+
+    fetch(`${apiBase}/avulsos`)
+      .then((r) => (r.ok ? r.json() : Promise.reject()))
+      .then(setAvulsos)
+      .catch(() => setAvulsos([]));
+  }, [apiBase]);
+
+  const reloadMeusAvulsos = useCallback(() => {
+    if (!apiBase || !selectedEncarregadoId) {
+      setMeusAvulsos([]);
+      return Promise.resolve();
+    }
+
+    return fetch(`${apiBase}/avulsos/minha?encarregado_id=${selectedEncarregadoId}`)
+      .then((r) => (r.ok ? r.json() : Promise.reject()))
+      .then(setMeusAvulsos)
+      .catch(() => {
+        setMeusAvulsos([]);
+      });
+  }, [apiBase, selectedEncarregadoId]);
+
+  useEffect(() => {
+    reloadMeusAvulsos();
+  }, [reloadMeusAvulsos]);
 
   useEffect(() => {
     const hasEletrico = Boolean(currentUser?.encarregado_id);
@@ -1436,6 +1493,47 @@ export default function App() {
       }
     })();
   }, [selectedKitId]);
+
+  useEffect(() => {
+    let alive = true;
+    if (posseSelecionada?.tipo !== "kit" || !posseSelecionada?.data?.id) {
+      setPosseKitItens([]);
+      setPosseStatusMap({});
+      return () => {
+        alive = false;
+      };
+    }
+
+    (async () => {
+      const kitId = posseSelecionada.data.id;
+      try {
+        const res = await withRetry(() => apiGet(`/kits/${kitId}/itens-detalhados/`), 2, 300);
+        if (!alive) return;
+        const list = safeArray(res);
+        setPosseKitItens(list);
+
+        const next = {};
+        for (const it of list) {
+          next[it.kit_item_id] = {
+            status: "PRESENTE",
+            subresponsavel_text: "",
+            subresponsavel_id: null,
+            distribuicao_confirmada: false,
+          };
+        }
+        setPosseStatusMap(next);
+      } catch (e) {
+        console.error("load posse kit itens error:", e);
+        if (!alive) return;
+        setPosseKitItens([]);
+        setPosseStatusMap({});
+      }
+    })();
+
+    return () => {
+      alive = false;
+    };
+  }, [posseSelecionada?.data?.id]);
 
   /**
    * =========================================================
@@ -1795,30 +1893,76 @@ export default function App() {
     });
   }
 
-  // 2) Solicitar devolução (usuário só solicita; admin encerra com PIN)
-  async function handleRequestDevolucao() {
-    if (!selectedKitId) return;
-
-    const motivo = window.prompt(
-      "Motivo da devolução do kit (ex: término de frente / troca de equipe / manutenção):"
-    );
-    if (motivo == null) return;
-    const m = String(motivo).trim();
-    if (!m) {
-      toast("Informe o motivo da devolução.");
+  async function solicitarDevolucaoKit(kitId) {
+    if (!kitId) {
+      toast("Kit inválido para devolução.");
+      return;
+    }
+    if (!authToken) {
+      toast("Faça login antes de solicitar a devolução.");
       return;
     }
 
     try {
-      await apiPost("/solicitacoes/devolucao", {
-        kit_id: Number(selectedKitId),
-        motivo: m,
-        observacao: "PWA",
+      const resp = await fetch(`${apiBase}/solicitacoes/operacao`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${authToken}`,
+        },
+        body: JSON.stringify({
+          tipo: "DEVOLUCAO_KIT",
+          kit_id: Number(kitId),
+        }),
       });
-      toast("Solicitação de devolução enviada. Admin vai receber e encerrar com PIN.");
+
+      if (!resp.ok) {
+        const err = await resp.json().catch(() => null);
+        throw new Error(err?.detail ?? err?.message ?? resp.statusText);
+      }
+
+      toast("Solicitação de devolução enviada. Aguarde validação do admin.");
+      setPosseSelecionada(null);
     } catch (e) {
-      toast("Não consegui registrar no backend (endpoint de solicitação ainda não confirmado).");
-      console.warn("devolucao request error:", e);
+      toast(e?.message ?? "Não foi possível enviar a devolução.");
+      console.error("solicitarDevolucaoKit error:", e);
+    }
+  }
+
+  async function solicitarDevolucaoAvulso(itemId) {
+    if (!itemId) {
+      toast("Avulso inválido para devolução.");
+      return;
+    }
+    if (!authToken) {
+      toast("Faça login antes de solicitar a devolução.");
+      return;
+    }
+
+    try {
+      const resp = await fetch(`${apiBase}/solicitacoes/operacao`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${authToken}`,
+        },
+        body: JSON.stringify({
+          tipo: "DEVOLUCAO_AVULSO",
+          item_id: Number(itemId),
+        }),
+      });
+
+      if (!resp.ok) {
+        const err = await resp.json().catch(() => null);
+        throw new Error(err?.detail ?? err?.message ?? resp.statusText);
+      }
+
+      toast("Solicitação de devolução enviada. Aguarde validação do admin.");
+      setPosseSelecionada(null);
+      await reloadMeusAvulsos();
+    } catch (e) {
+      toast(e?.message ?? "Não foi possível enviar a devolução.");
+      console.error("solicitarDevolucaoAvulso error:", e);
     }
   }
 
@@ -1883,29 +2027,6 @@ export default function App() {
   }
 
   // 5) Avulso: solicitar uso temporário
-  async function handleSolicitarAvulso(avulso) {
-    const motivo = window.prompt(
-      "Motivo do uso temporário (ex: serviço pontual / substituição / manutenção):"
-    );
-    if (motivo == null) return;
-    const m = String(motivo).trim();
-    if (!m) {
-      toast("Informe o motivo.");
-      return;
-    }
-    try {
-      await apiPost("/solicitacoes/avulso", {
-        kit_id: Number(selectedKitId) || null,
-        patrimonio: String(avulso?.patrimonio ?? ""),
-        motivo: m,
-        observacao: "PWA",
-      });
-      toast("Solicitação de avulso enviada. Admin vai aprovar/encaminhar conforme regra.");
-    } catch (e) {
-      toast("Não consegui registrar no backend (endpoint de avulso ainda não confirmado).");
-      console.warn("avulso request error:", e);
-    }
-  }
 
   /**
    * =========================================================
@@ -2863,6 +2984,68 @@ export default function App() {
           </div>
         </div>
       </div>
+      {posseSelecionada?.tipo === "kit" ? (
+        <div
+          style={{
+            marginTop: 12,
+            borderRadius: 14,
+            border: "1px solid rgba(255,255,255,0.15)",
+            background: "rgba(0,0,0,0.22)",
+            padding: 16,
+          }}
+        >
+          <DetalhesKitCard
+            items={posseKitItens}
+            statusMap={posseStatusMap}
+            geo={geo}
+            selectedKitId={String(posseSelecionada.data.id)}
+            kitLabel={posseSelecionada.data.nome}
+            selectedEncarregadoId={selectedEncarregadoId}
+            onSolicitarSubstituicao={handleSolicitarSubstituicao}
+            onReagrupar={handleReagruparItem}
+            onPickSubresponsavel={handleSubresponsavelPick}
+            onConfirmDistribuicao={markDistribConfirmado}
+            onSolicitarDevolucao={() => solicitarDevolucaoKit(posseSelecionada.data.id)}
+          />
+        </div>
+      ) : null}
+      {posseSelecionada?.tipo === "avulso" ? (
+        <div
+          style={{
+            marginTop: 12,
+            borderRadius: 14,
+            border: "1px solid rgba(255,255,255,0.15)",
+            background: "rgba(0,0,0,0.22)",
+            padding: 16,
+          }}
+        >
+          <CardShell title="Detalhes do avulso">
+            <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+              <div style={{ fontWeight: 800 }}>
+                {posseSelecionada.data?.descricao || posseSelecionada.data?.nome || "Avulso selecionado"}
+              </div>
+              <div style={{ fontSize: 12, opacity: 0.75 }}>
+                {posseSelecionada.data?.patrimonio}
+              </div>
+              <button
+                onClick={() => solicitarDevolucaoAvulso(posseSelecionada.data.id)}
+                style={{
+                  marginTop: 12,
+                  padding: "8px 12px",
+                  borderRadius: 10,
+                  border: "1px solid #b00020",
+                  background: "#b00020",
+                  color: "#fff",
+                  fontWeight: 900,
+                  cursor: "pointer",
+                }}
+              >
+                Solicitar devolução
+              </button>
+            </div>
+          </CardShell>
+        </div>
+      ) : null}
       <div
         style={{
           display: "grid",
@@ -2923,54 +3106,108 @@ export default function App() {
           <div style={meusListStyle}>
             {tabMeus === "kits" ? (
               meusKits.length ? (
-                meusKits.map((kit, idx) => (
-                  <div
-                    key={kit.id}
-                    onClick={() => {
-                      setSelectedKitId(String(kit.id));
-                      setSelecionado({ tipo: "kit", data: kit });
-                    }}
-                    style={{
-                      padding: "10px 12px",
-                      borderTop: idx === 0 ? "none" : "1px solid rgba(255,255,255,0.08)",
-                      borderRadius: 10,
-                      background: selectedKitId === String(kit.id) ? "rgba(255,255,255,0.08)" : "transparent",
-                      cursor: "pointer",
-                    }}
-                  >
-                    <div style={{ fontWeight: 800 }}>{kit.nome}</div>
-                    <div style={{ fontSize: 12, opacity: 0.7 }}>{formatKitLabel(kit)}</div>
-                  </div>
-                ))
+                meusKits.map((kit, idx) => {
+                  const kitPosseSelecionada = isKitPosseSelecionada(kit);
+                  return (
+                    <div
+                      key={kit.id}
+                      onClick={() => setPosseSelecionada({ tipo: "kit", data: kit })}
+                      style={{
+                        padding: "10px 12px",
+                        borderTop: idx === 0 ? "none" : "1px solid rgba(255,255,255,0.08)",
+                        borderRadius: 10,
+                        background: kitPosseSelecionada ? "rgba(255,255,255,0.08)" : "transparent",
+                        cursor: "pointer",
+                      }}
+                    >
+                      <div
+                        style={{
+                          display: "flex",
+                          justifyContent: "space-between",
+                          alignItems: "center",
+                        }}
+                      >
+                        <div>
+                          <div style={{ fontWeight: 800 }}>{kit.nome}</div>
+                          <div style={{ fontSize: 12, opacity: 0.7 }}>{formatKitLabel(kit)}</div>
+                        </div>
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setPosseSelecionada({ tipo: "kit", data: kit });
+                          }}
+                          style={{
+                            padding: "6px 10px",
+                            borderRadius: 8,
+                            border: "1px solid #111",
+                            background: "#111",
+                            color: "#fff",
+                            fontWeight: 800,
+                            cursor: "pointer",
+                          }}
+                        >
+                          Detalhes
+                        </button>
+                      </div>
+                    </div>
+                  );
+                })
               ) : (
                 <div style={{ fontSize: 12, opacity: 0.7 }}>Sem kits em posse.</div>
               )
-            ) : meusItensEmPosse.length ? (
+            ) : meusAvulsosReais.length ? (
               <>
                 <div style={{ fontSize: 12, opacity: 0.65 }}>
-                  Avulsos (provisorio): itens atualmente em posse.
+                  Meus avulsos em posse (reais).
                 </div>
-                {meusItensEmPosse.map((avulso, idx) => (
-                  <div
-                    key={avulso.id ?? `${avulso.patrimonio}-${idx}`}
-                    onClick={() => setSelecionado({ tipo: "avulso", data: avulso })}
-                    style={{
-                      padding: "10px 12px",
-                      borderTop: idx === 0 ? "none" : "1px solid rgba(255,255,255,0.08)",
-                      borderRadius: 10,
-                      background:
-                        selecionado?.tipo === "avulso" && selecionado?.data?.id === avulso.id
-                          ? "rgba(255,255,255,0.08)"
-                          : "transparent",
-                      cursor: "pointer",
-                    }}
-                  >
-                    <div style={{ fontWeight: 800 }}>{avulso.nome || avulso.patrimonio}</div>
-                    <div style={{ fontSize: 12, opacity: 0.75 }}>
-                      {avulso.status || "Presente sob sua responsabilidade"}
+                {meusAvulsosReais.map((avulso, idx) => {
+                  const avulsoPosseSelecionada = isAvulsoPosseSelecionada(avulso);
+                  return (
+                    <div
+                      key={avulso.id ?? `${avulso.patrimonio}-${idx}`}
+                      onClick={() => setPosseSelecionada({ tipo: "avulso", data: avulso })}
+                      style={{
+                        padding: "10px 12px",
+                        borderTop: idx === 0 ? "none" : "1px solid rgba(255,255,255,0.08)",
+                        borderRadius: 10,
+                        background: avulsoPosseSelecionada ? "rgba(255,255,255,0.08)" : "transparent",
+                        cursor: "pointer",
+                      }}
+                    >
+                      <div
+                        style={{
+                          display: "flex",
+                          justifyContent: "space-between",
+                          alignItems: "center",
+                        }}
+                      >
+                        <div>
+                          <div style={{ fontWeight: 800 }}>{avulso.nome || avulso.patrimonio}</div>
+                          <div style={{ fontSize: 12, opacity: 0.75 }}>
+                            {avulso.status || "Presente sob sua responsabilidade"}
+                          </div>
+                        </div>
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setPosseSelecionada({ tipo: "avulso", data: avulso });
+                          }}
+                          style={{
+                            padding: "6px 10px",
+                            borderRadius: 8,
+                            border: "1px solid #111",
+                            background: "#111",
+                            color: "#fff",
+                            fontWeight: 800,
+                            cursor: "pointer",
+                          }}
+                        >
+                          Detalhes
+                        </button>
+                      </div>
                     </div>
-                  </div>
-                ))}
+                  );
+                })}
               </>
             ) : (
               <div style={{ fontSize: 12, opacity: 0.7 }}>Sem avulsos em posse.</div>
@@ -2992,28 +3229,14 @@ export default function App() {
           <div style={{ fontWeight: 700 }}>Detalhes (preview)</div>
           {!selecionado ? (
             <div style={{ padding: 10, fontSize: 12, opacity: 0.7 }}>
-              Selecione um kit ou avulso em "Meus cautelados" para ver detalhes e ações.
+              Selecione nos superselects (disponíveis) para solicitar com termo.
             </div>
           ) : selecionado.tipo === "kit" ? (
-            <DetalhesKitCard
-              items={kitItens}
-              statusMap={statusMap}
-              geo={geo}
-              selectedKitId={selectedKitId}
-              kitLabel={kitLabel}
-              selectedEncarregadoId={selectedEncarregadoId}
-              onSolicitarSubstituicao={handleSolicitarSubstituicao}
-              onReagrupar={handleReagruparItem}
-              onPickSubresponsavel={handleSubresponsavelPick}
-              onConfirmDistribuicao={markDistribConfirmado}
-              readOnly
-            />
-          ) : (
             <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-              <div style={{ fontWeight: 800 }}>{selecionado.data?.nome || selecionado.data?.patrimonio}</div>
-              <div style={{ fontSize: 12, opacity: 0.75 }}>{selecionado.data?.status || "Presente sob sua responsabilidade"}</div>
+              <div style={{ fontWeight: 800 }}>{selecionado.data?.nome || "Kit selecionado"}</div>
+              <div style={{ fontSize: 12, opacity: 0.8 }}>{formatKitLabel(selecionado.data)}</div>
               <button
-                onClick={() => handleSolicitarAvulso?.(selecionado.data)}
+                onClick={openChecklistTermo}
                 style={{
                   alignSelf: "flex-start",
                   padding: "8px 12px",
@@ -3025,7 +3248,31 @@ export default function App() {
                   fontWeight: 700,
                 }}
               >
-                Solicitar avulso
+                Solicitar kit (com termo)
+              </button>
+            </div>
+          ) : (
+            <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+              <div style={{ fontWeight: 800 }}>
+                {selecionado.data?.descricao || selecionado.data?.patrimonio || "Avulso selecionado"}
+              </div>
+              <div style={{ fontSize: 12, opacity: 0.8 }}>
+                {selecionado.data?.status || "Selecione um avulso disponível"}
+              </div>
+              <button
+                onClick={() => openManualTermo?.(selecionado.data)}
+                style={{
+                  alignSelf: "flex-start",
+                  padding: "8px 12px",
+                  borderRadius: 10,
+                  border: "1px solid #111",
+                  background: "#111",
+                  color: "#fff",
+                  cursor: "pointer",
+                  fontWeight: 700,
+                }}
+              >
+                Solicitar avulso (com termo)
               </button>
             </div>
           )}
