@@ -2289,12 +2289,24 @@ export default function App() {
           background: "#f7f7f7",
         }}
       >
-        <div className="user-topbar__text">
+        <div className="user-topbar__text" style={{ flex: 1, minWidth: 0 }}>
           <div className="user-topbar__title" style={{ fontWeight: 800 }}>
-            {hasProfile ? (isAdmin ? "Admin" : isOperador ? "Operador" : "Usuario") : "Carregando"}
+            Usuário
+          </div>
+          <div style={{ fontSize: 14, opacity: 0.9, marginTop: 2 }}>
+            {currentUser?.nome ||
+              (hasProfile ? (isAdmin ? "Admin" : isOperador ? "Operador" : "Usuario") : "Carregando")}
+          </div>
+          <div style={{ marginTop: 6, fontSize: 12, opacity: 0.75 }}>Encarregado/Supervisor</div>
+          <div style={{ fontSize: 12, opacity: 0.75 }}>
+            {canEletrico ? (
+              <span style={{ fontWeight: 700 }}>{encarregadoLabel}</span>
+            ) : (
+              "Usuário sem encarregado vinculado. Eletricos bloqueados."
+            )}
           </div>
           {roleCopy ? (
-            <div className="user-topbar__subtitle" style={{ fontSize: 12, opacity: 0.8 }}>
+            <div className="user-topbar__subtitle" style={{ fontSize: 12, opacity: 0.8, marginTop: 4 }}>
               {roleCopy}
             </div>
           ) : null}
@@ -2992,374 +3004,389 @@ export default function App() {
 
 
       <div style={{ display: modo === "eletrico" ? "block" : "none" }}>
-      {/* Seleções */}
-      <div style={{ display: "flex", gap: 12, flexWrap: "wrap", marginBottom: 12 }}>
-        <div style={{ minWidth: 320 }}>
-          <label style={{ fontSize: 12, opacity: 0.85 }}>Kit</label>
-          <select
-            style={{ width: "100%", padding: 10 }}
-            value={selectedKitId}
-            onChange={(e) => setSelectedKitId(e.target.value)}
-          >
-            <option value="">Selecione…</option>
-            {kits.map((k) => (
-              <option key={k.id} value={k.id}>
-                #{k.id} • {k.nome}
-              </option>
-            ))}
-          </select>
-          {selectedKitId ? <div style={{ fontSize: 12, opacity: 0.75, marginTop: 6 }}>{kitLabel}</div> : null}
-        </div>
-
-        <div style={{ flex: 1, minWidth: 280 }}>
-          <label style={{ fontSize: 12, opacity: 0.85 }}>Avulso disponível</label>
-          <select
-            style={{ width: "100%", padding: 10 }}
-            value={selectedAvulsoId}
-            onChange={(e) => {
-              const id = e.target.value;
-              setSelectedAvulsoId(id);
-              if (!id) {
-                return;
-              }
-              const encontrado = (avulsosDisponiveis ?? []).find((a) => String(a.id) === String(id));
-              if (!encontrado) {
-                return;
-              }
-              setPreviewSelecionado({ tipo: "avulso", data: encontrado });
-            }}
-          >
-            <option value="">Selecione...</option>
-              {(avulsosDisponiveis ?? []).map((a) => (
-                <option key={a.id} value={a.id}>
-                  {a.patrimonio || a.codigo || a.id} - {a.descricao || a.nome || "Avulso"}
-                </option>
-              ))}
-          </select>
-        </div>
-
-        <div style={{ minWidth: 320 }}>
-          <label style={{ fontSize: 12, opacity: 0.85 }}>Encarregado/Supervisor</label>
-          {canEletrico ? (
-            <div style={{ marginTop: 8, fontWeight: 700 }}>{encarregadoLabel}</div>
-          ) : (
-            <div style={{ marginTop: 8, fontSize: 12, opacity: 0.75 }}>
-              Usuário sem encarregado vinculado. Eletricos bloqueados.
-            </div>
-          )}
-        </div>
-
-
-        <div style={{ flex: 1, minWidth: 280 }}>
-          <label style={{ fontSize: 12, opacity: 0.85 }}>Busca (patrimônio ou descrição)</label>
-          <input
-            style={{ width: "100%", padding: 10 }}
-            placeholder="Ex: 2056, furadeira, makita…"
-            value={q}
-            onChange={(e) => setQ(e.target.value)}
-            disabled={!selectedKitId || kitItens.length === 0}
-          />
-          <div style={{ fontSize: 12, opacity: 0.75, marginTop: 6 }}>
-            Dica: digite apenas o final do patrimônio (ex: "937"). Menos drama, mais controle.
-          </div>
-        </div>
-      </div>
-      {posseSelecionada?.tipo === "kit" ? (
         <div
           style={{
-            marginTop: 12,
-            borderRadius: 14,
-            border: "1px solid rgba(255,255,255,0.15)",
-            background: "rgba(0,0,0,0.22)",
-            padding: 16,
-          }}
-        >
-          <DetalhesKitCard
-            items={posseKitItens}
-            statusMap={posseStatusMap}
-            geo={geo}
-            selectedKitId={String(posseSelecionada.data.id)}
-            kitLabel={posseSelecionada.data.nome}
-            selectedEncarregadoId={selectedEncarregadoId}
-            onSolicitarSubstituicao={handleSolicitarSubstituicao}
-            onReagrupar={handleReagruparItem}
-            onPickSubresponsavel={handleSubresponsavelPickPosse}
-            onConfirmDistribuicao={markDistribConfirmadoPosse}
-            onSolicitarDevolucao={() => solicitarDevolucaoKit(posseSelecionada.data.id)}
-            onDistribuir={markDistribuindoPosse}
-          />
-        </div>
-      ) : null}
-      {posseSelecionada?.tipo === "avulso" ? (
-        <div
-          style={{
-            marginTop: 12,
-            borderRadius: 14,
-            border: "1px solid rgba(255,255,255,0.15)",
-            background: "rgba(0,0,0,0.22)",
-            padding: 16,
-          }}
-        >
-          <CardShell title="Detalhes do avulso">
-            <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-              <div style={{ fontWeight: 800 }}>
-                {posseSelecionada.data?.descricao || posseSelecionada.data?.nome || "Avulso selecionado"}
-              </div>
-              <div style={{ fontSize: 12, opacity: 0.75 }}>
-                {posseSelecionada.data?.patrimonio}
-              </div>
-              <button
-                onClick={() => solicitarDevolucaoAvulso(posseSelecionada.data.id)}
-                style={{
-                  marginTop: 12,
-                  padding: "8px 12px",
-                  borderRadius: 10,
-                  border: "1px solid #b00020",
-                  background: "#b00020",
-                  color: "#fff",
-                  fontWeight: 900,
-                  cursor: "pointer",
-                }}
-              >
-                Solicitar devolução
-              </button>
-            </div>
-          </CardShell>
-        </div>
-      ) : null}
-      <div
-        style={{
-          display: "grid",
-          gap: 16,
-          marginTop: 16,
-        }}
-      >
-        <div>
-          <SolicitacoesCard
-            totals={totals}
-            items={filtered}
-            statusMap={statusMap}
-            selectedKitId={selectedKitId}
-          />
-        </div>
-        <div
-          style={{
-            border: "1px solid rgba(255,255,255,0.15)",
-            borderRadius: 14,
-            padding: 16,
-            background: "rgba(0,0,0,0.28)",
             display: "flex",
             flexDirection: "column",
-            gap: 12,
+            gap: 16,
+            marginTop: 12,
           }}
         >
-          <div style={{ fontWeight: 700 }}>Meus cautelados</div>
-          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-            <button
-              onClick={() => setTabMeus("kits")}
-              style={{
-                padding: "6px 12px",
-                borderRadius: 10,
-                border: tabMeus === "kits" ? "1px solid #111" : "1px solid rgba(255,255,255,0.4)",
-                background: tabMeus === "kits" ? "#111" : "transparent",
-                color: tabMeus === "kits" ? "#fff" : "#f0f0f0",
-                cursor: "pointer",
-                fontWeight: 700,
-              }}
-            >
-              Kits
-            </button>
-            <button
-              onClick={() => setTabMeus("avulsos")}
-              style={{
-                padding: "6px 12px",
-                borderRadius: 10,
-                border: tabMeus === "avulsos" ? "1px solid #111" : "1px solid rgba(255,255,255,0.4)",
-                background: tabMeus === "avulsos" ? "#111" : "transparent",
-                color: tabMeus === "avulsos" ? "#fff" : "#f0f0f0",
-                cursor: "pointer",
-                fontWeight: 700,
-              }}
-            >
-              Avulsos
-            </button>
+          <div>
+            <SolicitacoesCard
+              totals={totals}
+              items={filtered}
+              statusMap={statusMap}
+              selectedKitId={selectedKitId}
+            />
           </div>
-          <div style={meusListStyle}>
-            {tabMeus === "kits" ? (
-              meusKits.length ? (
-                meusKits.map((kit, idx) => {
-                  const kitPosseSelecionada = isKitPosseSelecionada(kit);
-                  return (
-                    <div
-                      key={kit.id}
-                      onClick={() => setPosseSelecionada({ tipo: "kit", data: kit })}
-                      style={{
-                        padding: "10px 12px",
-                        borderTop: idx === 0 ? "none" : "1px solid rgba(255,255,255,0.08)",
-                        borderRadius: 10,
-                        background: kitPosseSelecionada ? "rgba(255,255,255,0.08)" : "transparent",
-                        cursor: "pointer",
-                      }}
-                    >
-                      <div
-                        style={{
-                          display: "flex",
-                          justifyContent: "space-between",
-                          alignItems: "center",
-                        }}
-                      >
-                        <div>
-                          <div style={{ fontWeight: 800 }}>{kit.nome}</div>
-                          <div style={{ fontSize: 12, opacity: 0.7 }}>{formatKitLabel(kit)}</div>
-                        </div>
-                        <button
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            setPosseSelecionada({ tipo: "kit", data: kit });
-                          }}
+          <div
+            style={{
+              display: "flex",
+              gap: 12,
+              flexWrap: "wrap",
+              alignItems: "stretch",
+            }}
+          >
+            <div
+              style={{
+                flex: "1 1 320px",
+                minWidth: 320,
+                border: "1px solid rgba(255,255,255,0.15)",
+                borderRadius: 14,
+                padding: 16,
+                background: "rgba(0,0,0,0.28)",
+                display: "flex",
+                flexDirection: "column",
+                gap: 12,
+              }}
+            >
+              <div style={{ fontWeight: 700 }}>Meus cautelados</div>
+              <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                <button
+                  onClick={() => setTabMeus("kits")}
+                  style={{
+                    padding: "6px 12px",
+                    borderRadius: 10,
+                    border: tabMeus === "kits" ? "1px solid #111" : "1px solid rgba(255,255,255,0.4)",
+                    background: tabMeus === "kits" ? "#111" : "transparent",
+                    color: tabMeus === "kits" ? "#fff" : "#f0f0f0",
+                    cursor: "pointer",
+                    fontWeight: 700,
+                  }}
+                >
+                  Kits
+                </button>
+                <button
+                  onClick={() => setTabMeus("avulsos")}
+                  style={{
+                    padding: "6px 12px",
+                    borderRadius: 10,
+                    border: tabMeus === "avulsos" ? "1px solid #111" : "1px solid rgba(255,255,255,0.4)",
+                    background: tabMeus === "avulsos" ? "#111" : "transparent",
+                    color: tabMeus === "avulsos" ? "#fff" : "#f0f0f0",
+                    cursor: "pointer",
+                    fontWeight: 700,
+                  }}
+                >
+                  Avulsos
+                </button>
+              </div>
+              <div style={meusListStyle}>
+                {tabMeus === "kits" ? (
+                  meusKits.length ? (
+                    meusKits.map((kit, idx) => {
+                      const kitPosseSelecionada = isKitPosseSelecionada(kit);
+                      return (
+                        <div
+                          key={kit.id}
+                          onClick={() => setPosseSelecionada({ tipo: "kit", data: kit })}
                           style={{
-                            padding: "6px 10px",
-                            borderRadius: 8,
-                            border: "1px solid #111",
-                            background: "#111",
-                            color: "#fff",
-                            fontWeight: 800,
+                            padding: "10px 12px",
+                            borderTop: idx === 0 ? "none" : "1px solid rgba(255,255,255,0.08)",
+                            borderRadius: 10,
+                            background: kitPosseSelecionada ? "rgba(255,255,255,0.08)" : "transparent",
                             cursor: "pointer",
                           }}
                         >
-                          Detalhes
-                        </button>
-                      </div>
-                    </div>
-                  );
-                })
-              ) : (
-                <div style={{ fontSize: 12, opacity: 0.7 }}>Sem kits em posse.</div>
-              )
-            ) : meusAvulsosReais.length ? (
-              <>
-                <div style={{ fontSize: 12, opacity: 0.65 }}>
-                  Meus avulsos em posse (reais).
-                </div>
-                {meusAvulsosReais.map((avulso, idx) => {
-                  const avulsoPosseSelecionada = isAvulsoPosseSelecionada(avulso);
-                  return (
-                    <div
-                      key={avulso.id ?? `${avulso.patrimonio}-${idx}`}
-                      onClick={() => setPosseSelecionada({ tipo: "avulso", data: avulso })}
-                      style={{
-                        padding: "10px 12px",
-                        borderTop: idx === 0 ? "none" : "1px solid rgba(255,255,255,0.08)",
-                        borderRadius: 10,
-                        background: avulsoPosseSelecionada ? "rgba(255,255,255,0.08)" : "transparent",
-                        cursor: "pointer",
-                      }}
-                    >
-                      <div
-                        style={{
-                          display: "flex",
-                          justifyContent: "space-between",
-                          alignItems: "center",
-                        }}
-                      >
-                        <div>
-                          <div style={{ fontWeight: 800 }}>{avulso.nome || avulso.patrimonio}</div>
-                          <div style={{ fontSize: 12, opacity: 0.75 }}>
-                            {avulso.status || "Presente sob sua responsabilidade"}
+                          <div
+                            style={{
+                              display: "flex",
+                              justifyContent: "space-between",
+                              alignItems: "center",
+                            }}
+                          >
+                            <div>
+                              <div style={{ fontWeight: 800 }}>{kit.nome}</div>
+                              <div style={{ fontSize: 12, opacity: 0.7 }}>{formatKitLabel(kit)}</div>
+                            </div>
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setPosseSelecionada({ tipo: "kit", data: kit });
+                              }}
+                              style={{
+                                padding: "6px 10px",
+                                borderRadius: 8,
+                                border: "1px solid #111",
+                                background: "#111",
+                                color: "#fff",
+                                fontWeight: 800,
+                                cursor: "pointer",
+                              }}
+                            >
+                              Detalhes
+                            </button>
                           </div>
                         </div>
-                        <button
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            setPosseSelecionada({ tipo: "avulso", data: avulso });
-                          }}
+                      );
+                    })
+                  ) : (
+                    <div style={{ fontSize: 12, opacity: 0.7 }}>Sem kits em posse.</div>
+                  )
+                ) : meusAvulsosReais.length ? (
+                  <>
+                    <div style={{ fontSize: 12, opacity: 0.65 }}>
+                      Meus avulsos em posse (reais).
+                    </div>
+                    {meusAvulsosReais.map((avulso, idx) => {
+                      const avulsoPosseSelecionada = isAvulsoPosseSelecionada(avulso);
+                      return (
+                        <div
+                          key={avulso.id ?? `${avulso.patrimonio}-${idx}`}
+                          onClick={() => setPosseSelecionada({ tipo: "avulso", data: avulso })}
                           style={{
-                            padding: "6px 10px",
-                            borderRadius: 8,
-                            border: "1px solid #111",
-                            background: "#111",
-                            color: "#fff",
-                            fontWeight: 800,
+                            padding: "10px 12px",
+                            borderTop: idx === 0 ? "none" : "1px solid rgba(255,255,255,0.08)",
+                            borderRadius: 10,
+                            background: avulsoPosseSelecionada ? "rgba(255,255,255,0.08)" : "transparent",
                             cursor: "pointer",
                           }}
                         >
-                          Detalhes
-                        </button>
-                      </div>
+                          <div
+                            style={{
+                              display: "flex",
+                              justifyContent: "space-between",
+                              alignItems: "center",
+                            }}
+                          >
+                            <div>
+                              <div style={{ fontWeight: 800 }}>{avulso.nome || avulso.patrimonio}</div>
+                              <div style={{ fontSize: 12, opacity: 0.75 }}>
+                                {avulso.status || "Presente sob sua responsabilidade"}
+                              </div>
+                            </div>
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setPosseSelecionada({ tipo: "avulso", data: avulso });
+                              }}
+                              style={{
+                                padding: "6px 10px",
+                                borderRadius: 8,
+                                border: "1px solid #111",
+                                background: "#111",
+                                color: "#fff",
+                                fontWeight: 800,
+                                cursor: "pointer",
+                              }}
+                            >
+                              Detalhes
+                            </button>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </>
+                ) : (
+                  <div style={{ fontSize: 12, opacity: 0.7 }}>Sem avulsos em posse.</div>
+                )}
+              </div>
+            </div>
+            <div
+              style={{
+                flex: "1 1 320px",
+                minWidth: 320,
+                display: "flex",
+              }}
+            >
+              <div
+                style={{
+                  width: "100%",
+                  border: "1px solid rgba(255,255,255,0.15)",
+                  borderRadius: 14,
+                  padding: 16,
+                  background: "rgba(0,0,0,0.28)",
+                  minHeight: 320,
+                  display: "flex",
+                  flexDirection: "column",
+                  gap: 12,
+                }}
+              >
+                <div style={{ fontWeight: 700 }}>Detalhes</div>
+                <div style={{ flex: 1, minHeight: 0 }}>
+                  {!posseSelecionada ? (
+                    <div style={{ padding: 10, fontSize: 12, opacity: 0.7 }}>
+                      Selecione um item em "Meus cautelados"...
                     </div>
-                  );
-                })}
-              </>
+                  ) : posseSelecionada?.tipo === "kit" ? (
+                    <div
+                      style={{
+                        borderRadius: 14,
+                        border: "1px solid rgba(255,255,255,0.15)",
+                        background: "rgba(0,0,0,0.22)",
+                        padding: 16,
+                      }}
+                    >
+                      <DetalhesKitCard
+                        items={posseKitItens}
+                        statusMap={posseStatusMap}
+                        geo={geo}
+                        selectedKitId={String(posseSelecionada.data.id)}
+                        kitLabel={posseSelecionada.data.nome}
+                        selectedEncarregadoId={selectedEncarregadoId}
+                        onSolicitarSubstituicao={handleSolicitarSubstituicao}
+                        onReagrupar={handleReagruparItem}
+                        onPickSubresponsavel={handleSubresponsavelPickPosse}
+                        onConfirmDistribuicao={markDistribConfirmadoPosse}
+                        onSolicitarDevolucao={() => solicitarDevolucaoKit(posseSelecionada.data.id)}
+                        onDistribuir={markDistribuindoPosse}
+                      />
+                    </div>
+                  ) : (
+                    <div
+                      style={{
+                        borderRadius: 14,
+                        border: "1px solid rgba(255,255,255,0.15)",
+                        background: "rgba(0,0,0,0.22)",
+                        padding: 16,
+                      }}
+                    >
+                      <CardShell title="Detalhes do avulso">
+                        <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                          <div style={{ fontWeight: 800 }}>
+                            {posseSelecionada.data?.descricao || posseSelecionada.data?.nome || "Avulso selecionado"}
+                          </div>
+                          <div style={{ fontSize: 12, opacity: 0.75 }}>
+                            {posseSelecionada.data?.patrimonio}
+                          </div>
+                          <button
+                            onClick={() => solicitarDevolucaoAvulso(posseSelecionada.data.id)}
+                            style={{
+                              marginTop: 12,
+                              padding: "8px 12px",
+                              borderRadius: 10,
+                              border: "1px solid #b00020",
+                              background: "#b00020",
+                              color: "#fff",
+                              fontWeight: 900,
+                              cursor: "pointer",
+                            }}
+                          >
+                            Solicitar devolução
+                          </button>
+                        </div>
+                      </CardShell>
+                    </div>
+                  )}
+                </div>
+              </div>
+            </div>
+          </div>
+          <div
+            style={{
+              display: "flex",
+              gap: 12,
+              flexWrap: "wrap",
+            }}
+          >
+            <div style={{ minWidth: 320 }}>
+              <label style={{ fontSize: 12, opacity: 0.85 }}>Kit</label>
+              <select
+                style={{ width: "100%", padding: 10 }}
+                value={selectedKitId}
+                onChange={(e) => setSelectedKitId(e.target.value)}
+              >
+                <option value="">Selecione…</option>
+                {kits.map((k) => (
+                  <option key={k.id} value={k.id}>
+                    #{k.id} • {k.nome}
+                  </option>
+                ))}
+              </select>
+              {selectedKitId ? <div style={{ fontSize: 12, opacity: 0.75, marginTop: 6 }}>{kitLabel}</div> : null}
+            </div>
+            <div style={{ flex: 1, minWidth: 280 }}>
+              <label style={{ fontSize: 12, opacity: 0.85 }}>Avulso disponível</label>
+              <select
+                style={{ width: "100%", padding: 10 }}
+                value={selectedAvulsoId}
+                onChange={(e) => {
+                  const id = e.target.value;
+                  setSelectedAvulsoId(id);
+                  if (!id) {
+                    return;
+                  }
+                  const encontrado = (avulsosDisponiveis ?? []).find((a) => String(a.id) === String(id));
+                  if (!encontrado) {
+                    return;
+                  }
+                  setPreviewSelecionado({ tipo: "avulso", data: encontrado });
+                }}
+              >
+                <option value="">Selecione...</option>
+                {(avulsosDisponiveis ?? []).map((a) => (
+                  <option key={a.id} value={a.id}>
+                    {a.patrimonio || a.codigo || a.id} - {a.descricao || a.nome || "Avulso"}
+                  </option>
+                ))}
+              </select>
+            </div>
+          </div>
+          <div
+            style={{
+              border: "1px solid rgba(255,255,255,0.15)",
+              borderRadius: 14,
+              padding: 16,
+              background: "rgba(0,0,0,0.28)",
+              display: "flex",
+              flexDirection: "column",
+              gap: 12,
+            }}
+          >
+            <div style={{ fontWeight: 700 }}>Detalhes (preview)</div>
+            {!previewSelecionado ? (
+              <div style={{ padding: 10, fontSize: 12, opacity: 0.7 }}>
+                Selecione nos superselects (disponíveis) para solicitar com termo.
+              </div>
+            ) : previewSelecionado.tipo === "kit" ? (
+              <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+                <div style={{ fontWeight: 800 }}>{previewSelecionado.data?.nome || "Kit selecionado"}</div>
+                <div style={{ fontSize: 12, opacity: 0.8 }}>{formatKitLabel(previewSelecionado.data)}</div>
+                <button
+                  onClick={openChecklistTermo}
+                  style={{
+                    alignSelf: "flex-start",
+                    padding: "8px 12px",
+                    borderRadius: 10,
+                    border: "1px solid #111",
+                    background: "#111",
+                    color: "#fff",
+                    cursor: "pointer",
+                    fontWeight: 700,
+                  }}
+                >
+                  Solicitar kit (com termo)
+                </button>
+              </div>
             ) : (
-              <div style={{ fontSize: 12, opacity: 0.7 }}>Sem avulsos em posse.</div>
+              <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+                <div style={{ fontWeight: 800 }}>
+                  {previewSelecionado.data?.descricao || previewSelecionado.data?.patrimonio || "Avulso selecionado"}
+                </div>
+                <div style={{ fontSize: 12, opacity: 0.8 }}>
+                  {previewSelecionado.data?.status || "Selecione um avulso disponível"}
+                </div>
+                <button
+                  onClick={() => openManualTermo?.(previewSelecionado.data)}
+                  style={{
+                    alignSelf: "flex-start",
+                    padding: "8px 12px",
+                    borderRadius: 10,
+                    border: "1px solid #111",
+                    background: "#111",
+                    color: "#fff",
+                    cursor: "pointer",
+                    fontWeight: 700,
+                  }}
+                >
+                  Solicitar avulso (com termo)
+                </button>
+              </div>
             )}
           </div>
         </div>
-        <div
-          style={{
-            border: "1px solid rgba(255,255,255,0.15)",
-            borderRadius: 14,
-            padding: 16,
-            background: "rgba(0,0,0,0.22)",
-            minHeight: 320,
-            display: "flex",
-            flexDirection: "column",
-            gap: 12,
-          }}
-        >
-          <div style={{ fontWeight: 700 }}>Detalhes (preview)</div>
-          {!previewSelecionado ? (
-            <div style={{ padding: 10, fontSize: 12, opacity: 0.7 }}>
-              Selecione nos superselects (disponíveis) para solicitar com termo.
-            </div>
-          ) : previewSelecionado.tipo === "kit" ? (
-            <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-              <div style={{ fontWeight: 800 }}>{previewSelecionado.data?.nome || "Kit selecionado"}</div>
-              <div style={{ fontSize: 12, opacity: 0.8 }}>{formatKitLabel(previewSelecionado.data)}</div>
-              <button
-                onClick={openChecklistTermo}
-                style={{
-                  alignSelf: "flex-start",
-                  padding: "8px 12px",
-                  borderRadius: 10,
-                  border: "1px solid #111",
-                  background: "#111",
-                  color: "#fff",
-                  cursor: "pointer",
-                  fontWeight: 700,
-                }}
-              >
-                Solicitar kit (com termo)
-              </button>
-            </div>
-          ) : (
-            <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-            <div style={{ fontWeight: 800 }}>
-              {previewSelecionado.data?.descricao || previewSelecionado.data?.patrimonio || "Avulso selecionado"}
-            </div>
-            <div style={{ fontSize: 12, opacity: 0.8 }}>
-              {previewSelecionado.data?.status || "Selecione um avulso disponível"}
-            </div>
-            <button
-              onClick={() => openManualTermo?.(previewSelecionado.data)}
-                style={{
-                  alignSelf: "flex-start",
-                  padding: "8px 12px",
-                  borderRadius: 10,
-                  border: "1px solid #111",
-                  background: "#111",
-                  color: "#fff",
-                  cursor: "pointer",
-                  fontWeight: 700,
-                }}
-              >
-                Solicitar avulso (com termo)
-              </button>
-            </div>
-          )}
-        </div>
       </div>
-
       {substModalItem && (
         <div
           onClick={() => {
@@ -3466,9 +3493,8 @@ export default function App() {
         </div>
       )}
 
-        </div>
-        </div>
-      )}
+    </div>
+  )}
     </div>
   );
 }
