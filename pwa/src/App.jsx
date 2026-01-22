@@ -700,7 +700,7 @@ function SolicitacoesCard({ totals, items, statusMap, selectedKitId }) {
         Pendências locais (kit precisa estar íntegro para liberar o termo):
       </div>
 
-      <div style={{ maxHeight: 220, overflow: "auto", border: "1px solid #eee", borderRadius: 12 }}>
+      <div style={{ border: "1px solid #eee", borderRadius: 12 }}>
         {!selectedKitId ? (
           <div style={{ padding: 12, fontSize: 12, opacity: 0.75 }}>Selecione um kit para analisar pendências.</div>
         ) : pendentes.length === 0 ? (
@@ -791,7 +791,8 @@ function DetalhesKitCard({
       ) : !items || items.length === 0 ? (
         <div style={{ padding: 10, fontSize: 12, opacity: 0.75 }}>Kit sem itens ou falha ao carregar.</div>
       ) : (
-        <div style={{ maxHeight: 520, overflow: "auto", border: "1px solid #eee", borderRadius: 12 }}>
+        <div style={{ border: "1px solid rgba(255,255,255,0.12)", borderRadius: 12, overflow: "hidden" }}>
+          <div style={{ display: "flex", flexDirection: "column" }}>
           {items.map((x, idx) => {
             const kitItemKey = x.kit_item_id ?? x.id ?? `${x.patrimonio ?? ""}-${idx}`;
             const st = statusMap?.[kitItemKey] ?? {
@@ -902,7 +903,8 @@ function DetalhesKitCard({
             );
           })}
         </div>
-      )}
+      </div>
+    )}
     </CardShell>
   );
 }
@@ -1035,7 +1037,22 @@ export default function App() {
   const meusAvulsosReais = meusAvulsos ?? [];
   const kitsDisponiveis = kits ?? [];
   const avulsosDisponiveis = avulsos ?? [];
-  const MEUS_CAUTE_MAX_HEIGHT = 10 * 56;
+  const meusKitsId = new Set((meusKits ?? []).map((k) => String(k.id)));
+  const meusAvulsosId = new Set((meusAvulsosReais ?? []).map((a) => String(a.id)));
+  const meusAvulsosPat = new Set(
+    (meusAvulsosReais ?? [])
+      .map((a) => String(a.patrimonio ?? "").trim())
+      .filter(Boolean)
+  );
+  const kitsDisponiveisFiltrados = (kitsDisponiveis ?? []).filter(
+    (k) => !meusKitsId.has(String(k.id))
+  );
+  const avulsosDisponiveisFiltrados = (avulsosDisponiveis ?? []).filter((a) => {
+    const idOk = !meusAvulsosId.has(String(a.id));
+    const pat = String(a.patrimonio ?? "").trim();
+    const patOk = pat ? !meusAvulsosPat.has(pat) : true;
+    return idOk && patOk;
+  });
   const meusListStyle = {
     borderTop: "1px solid rgba(255,255,255,0.08)",
     paddingTop: 12,
@@ -1043,9 +1060,6 @@ export default function App() {
     display: "flex",
     flexDirection: "column",
     gap: 10,
-    maxHeight: MEUS_CAUTE_MAX_HEIGHT,
-    overflowY: "auto",
-    scrollbarGutter: "stable",
   };
 
   const isKitPosseSelecionada = (kit) =>
@@ -1090,6 +1104,31 @@ export default function App() {
     const db = new Date(b?.criado_em || b?.created_at || b?.data_hora || 0).getTime();
     return db - da;
   });
+
+  function handleAvulsoSelectChange(id) {
+    setSelectedAvulsoId(id);
+    if (!id) {
+      setPreviewSelecionado(null);
+      return null;
+    }
+    const encontrado = (avulsosDisponiveisFiltrados ?? []).find(
+      (a) => String(a.id) === String(id)
+    );
+    if (!encontrado) {
+      setPreviewSelecionado(null);
+      return null;
+    }
+    setPreviewSelecionado({ tipo: "avulso", data: encontrado });
+    return encontrado;
+  }
+
+  function handleSolicitarAvulsoComTermo() {
+    const item = previewSelecionado?.data;
+    if (!item) {
+      return;
+    }
+    openManualTermo?.(item);
+  }
 
   const adminTrailLastTerm = adminTrailTerms[0] ?? null;
   const adminTrailOldTerms = adminTrailTerms.slice(1);
@@ -3024,8 +3063,8 @@ export default function App() {
             style={{
               display: "flex",
               gap: 12,
-              flexWrap: "wrap",
               alignItems: "stretch",
+              height: 520,
             }}
           >
             <div
@@ -3039,6 +3078,8 @@ export default function App() {
                 display: "flex",
                 flexDirection: "column",
                 gap: 12,
+                overflow: "hidden",
+                minHeight: 0,
               }}
             >
               <div style={{ fontWeight: 700 }}>Meus cautelados</div>
@@ -3072,7 +3113,20 @@ export default function App() {
                   Avulsos
                 </button>
               </div>
-              <div style={meusListStyle}>
+              <div
+                style={{
+                  flex: 1,
+                  minHeight: 0,
+                  overflowY: "auto",
+                  scrollbarGutter: "stable",
+                  borderTop: "1px solid rgba(255,255,255,0.08)",
+                  paddingTop: 12,
+                  paddingRight: 8,
+                  display: "flex",
+                  flexDirection: "column",
+                  gap: 10,
+                }}
+              >
                 {tabMeus === "kits" ? (
                   meusKits.length ? (
                     meusKits.map((kit, idx) => {
@@ -3187,89 +3241,72 @@ export default function App() {
               style={{
                 flex: "1 1 320px",
                 minWidth: 320,
+                border: "1px solid rgba(255,255,255,0.15)",
+                borderRadius: 14,
+                padding: 16,
+                background: "rgba(0,0,0,0.28)",
                 display: "flex",
+                flexDirection: "column",
+                gap: 12,
+                overflow: "hidden",
+                minHeight: 0,
               }}
             >
+              <div style={{ fontWeight: 700 }}>Detalhes</div>
               <div
                 style={{
-                  width: "100%",
-                  border: "1px solid rgba(255,255,255,0.15)",
-                  borderRadius: 14,
-                  padding: 16,
-                  background: "rgba(0,0,0,0.28)",
-                  minHeight: 320,
-                  display: "flex",
-                  flexDirection: "column",
-                  gap: 12,
+                  flex: 1,
+                  minHeight: 0,
+                  overflowY: "auto",
+                  scrollbarGutter: "stable",
                 }}
               >
-                <div style={{ fontWeight: 700 }}>Detalhes</div>
-                <div style={{ flex: 1, minHeight: 0 }}>
-                  {!posseSelecionada ? (
-                    <div style={{ padding: 10, fontSize: 12, opacity: 0.7 }}>
-                      Selecione um item em "Meus cautelados"...
+                {!posseSelecionada ? (
+                  <div style={{ padding: 10, fontSize: 12, opacity: 0.7 }}>
+                    Selecione um item em "Meus cautelados"...
+                  </div>
+                ) : posseSelecionada?.tipo === "kit" ? (
+                  <DetalhesKitCard
+                    items={posseKitItens}
+                    statusMap={posseStatusMap}
+                    geo={geo}
+                    selectedKitId={String(posseSelecionada.data.id)}
+                    kitLabel={posseSelecionada.data.nome}
+                    selectedEncarregadoId={selectedEncarregadoId}
+                    onSolicitarSubstituicao={handleSolicitarSubstituicao}
+                    onReagrupar={handleReagruparItem}
+                    onPickSubresponsavel={handleSubresponsavelPickPosse}
+                    onConfirmDistribuicao={markDistribConfirmadoPosse}
+                    onSolicitarDevolucao={() => solicitarDevolucaoKit(posseSelecionada.data.id)}
+                    onDistribuir={markDistribuindoPosse}
+                  />
+                ) : (
+                  <CardShell title="Detalhes do avulso">
+                    <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                      <div style={{ fontWeight: 800 }}>
+                        {posseSelecionada.data?.descricao || posseSelecionada.data?.nome || "Avulso selecionado"}
+                      </div>
+                      <div style={{ fontSize: 12, opacity: 0.75 }}>
+                        {posseSelecionada.data?.patrimonio}
+                      </div>
+                      <button
+                        onClick={() => solicitarDevolucaoAvulso(posseSelecionada.data.id)}
+                        style={{
+                          marginTop: 12,
+                          padding: "8px 12px",
+                          borderRadius: 10,
+                          border: "1px solid #b00020",
+                          background: "#b00020",
+                          color: "#fff",
+                          fontWeight: 900,
+                          cursor: "pointer",
+                        }}
+                      >
+                        Solicitar devolução
+                      </button>
                     </div>
-                  ) : posseSelecionada?.tipo === "kit" ? (
-                    <div
-                      style={{
-                        borderRadius: 14,
-                        border: "1px solid rgba(255,255,255,0.15)",
-                        background: "rgba(0,0,0,0.22)",
-                        padding: 16,
-                      }}
-                    >
-                      <DetalhesKitCard
-                        items={posseKitItens}
-                        statusMap={posseStatusMap}
-                        geo={geo}
-                        selectedKitId={String(posseSelecionada.data.id)}
-                        kitLabel={posseSelecionada.data.nome}
-                        selectedEncarregadoId={selectedEncarregadoId}
-                        onSolicitarSubstituicao={handleSolicitarSubstituicao}
-                        onReagrupar={handleReagruparItem}
-                        onPickSubresponsavel={handleSubresponsavelPickPosse}
-                        onConfirmDistribuicao={markDistribConfirmadoPosse}
-                        onSolicitarDevolucao={() => solicitarDevolucaoKit(posseSelecionada.data.id)}
-                        onDistribuir={markDistribuindoPosse}
-                      />
-                    </div>
-                  ) : (
-                    <div
-                      style={{
-                        borderRadius: 14,
-                        border: "1px solid rgba(255,255,255,0.15)",
-                        background: "rgba(0,0,0,0.22)",
-                        padding: 16,
-                      }}
-                    >
-                      <CardShell title="Detalhes do avulso">
-                        <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-                          <div style={{ fontWeight: 800 }}>
-                            {posseSelecionada.data?.descricao || posseSelecionada.data?.nome || "Avulso selecionado"}
-                          </div>
-                          <div style={{ fontSize: 12, opacity: 0.75 }}>
-                            {posseSelecionada.data?.patrimonio}
-                          </div>
-                          <button
-                            onClick={() => solicitarDevolucaoAvulso(posseSelecionada.data.id)}
-                            style={{
-                              marginTop: 12,
-                              padding: "8px 12px",
-                              borderRadius: 10,
-                              border: "1px solid #b00020",
-                              background: "#b00020",
-                              color: "#fff",
-                              fontWeight: 900,
-                              cursor: "pointer",
-                            }}
-                          >
-                            Solicitar devolução
-                          </button>
-                        </div>
-                      </CardShell>
-                    </div>
-                  )}
-                </div>
+                  </CardShell>
+                )}
               </div>
             </div>
           </div>
@@ -3288,7 +3325,7 @@ export default function App() {
                 onChange={(e) => setSelectedKitId(e.target.value)}
               >
                 <option value="">Selecione…</option>
-                {kits.map((k) => (
+                {kitsDisponiveisFiltrados.map((k) => (
                   <option key={k.id} value={k.id}>
                     #{k.id} • {k.nome}
                   </option>
@@ -3301,21 +3338,10 @@ export default function App() {
               <select
                 style={{ width: "100%", padding: 10 }}
                 value={selectedAvulsoId}
-                onChange={(e) => {
-                  const id = e.target.value;
-                  setSelectedAvulsoId(id);
-                  if (!id) {
-                    return;
-                  }
-                  const encontrado = (avulsosDisponiveis ?? []).find((a) => String(a.id) === String(id));
-                  if (!encontrado) {
-                    return;
-                  }
-                  setPreviewSelecionado({ tipo: "avulso", data: encontrado });
-                }}
+                onChange={(e) => handleAvulsoSelectChange(e.target.value)}
               >
                 <option value="">Selecione...</option>
-                {(avulsosDisponiveis ?? []).map((a) => (
+                {avulsosDisponiveisFiltrados.map((a) => (
                   <option key={a.id} value={a.id}>
                     {a.patrimonio || a.codigo || a.id} - {a.descricao || a.nome || "Avulso"}
                   </option>
@@ -3367,21 +3393,21 @@ export default function App() {
                 <div style={{ fontSize: 12, opacity: 0.8 }}>
                   {previewSelecionado.data?.status || "Selecione um avulso disponível"}
                 </div>
-                <button
-                  onClick={() => openManualTermo?.(previewSelecionado.data)}
-                  style={{
-                    alignSelf: "flex-start",
-                    padding: "8px 12px",
-                    borderRadius: 10,
-                    border: "1px solid #111",
-                    background: "#111",
-                    color: "#fff",
-                    cursor: "pointer",
-                    fontWeight: 700,
-                  }}
-                >
-                  Solicitar avulso (com termo)
-                </button>
+                    <button
+                      onClick={handleSolicitarAvulsoComTermo}
+                      style={{
+                        alignSelf: "flex-start",
+                        padding: "8px 12px",
+                        borderRadius: 10,
+                        border: "1px solid #111",
+                        background: "#111",
+                        color: "#fff",
+                        cursor: "pointer",
+                        fontWeight: 700,
+                      }}
+                    >
+                      Solicitar avulso (com termo)
+                    </button>
               </div>
             )}
           </div>
