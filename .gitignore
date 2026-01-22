@@ -46,3 +46,8 @@ temp-*.json
 backend/out/
 backend/body_*.json
 
+# FastAPI / OpenAPI
+openapi.json
+
+# Artefatos temporários / dados
+*.xlsx

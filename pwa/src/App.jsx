@@ -736,6 +736,7 @@ function DetalhesKitCard({
   onReagrupar,
   onSolicitarSubstituicao,
   onSolicitarDevolucao,
+  onDistribuir,
   readOnly = false,
 }) {
   const renderStatus = (st) => {
@@ -792,7 +793,8 @@ function DetalhesKitCard({
       ) : (
         <div style={{ maxHeight: 520, overflow: "auto", border: "1px solid #eee", borderRadius: 12 }}>
           {items.map((x, idx) => {
-            const st = statusMap?.[x.kit_item_id] ?? {
+            const kitItemKey = x.kit_item_id ?? x.id ?? `${x.patrimonio ?? ""}-${idx}`;
+            const st = statusMap?.[kitItemKey] ?? {
               status: null,
               subresponsavel_text: "",
               subresponsavel_id: null,
@@ -802,7 +804,7 @@ function DetalhesKitCard({
 
             return (
               <div
-                key={x.kit_item_id}
+                key={kitItemKey}
                 style={{
                   padding: 12,
                   borderTop: idx === 0 ? "none" : "1px solid #f1f1f1",
@@ -860,7 +862,7 @@ function DetalhesKitCard({
                       </button>
                     ) : (
                       <button
-                        onClick={() => onPickSubresponsavel?.(x.kit_item_id, { id: null, nome: "" }, true)}
+                        onClick={() => onDistribuir?.(kitItemKey)}
                         disabled={!selectedKitId || !selectedEncarregadoId}
                         style={{
                           padding: "8px 10px",
@@ -891,8 +893,8 @@ function DetalhesKitCard({
                       valueText={st.subresponsavel_text}
                       selectedId={st.subresponsavel_id}
                       disabled={!selectedKitId || !selectedEncarregadoId}
-                      onPick={({ id, nome }) => onPickSubresponsavel?.(x.kit_item_id, { id, nome }, false)}
-                      onConfirmSuccess={() => onConfirmDistribuicao?.(x.kit_item_id)}
+                        onPick={({ id, nome }) => onPickSubresponsavel?.(kitItemKey, { id, nome }, false)}
+                        onConfirmSuccess={() => onConfirmDistribuicao?.(kitItemKey)}
                     />
                   </div>
                 ) : null}
@@ -982,11 +984,12 @@ export default function App() {
   const [substModalItem, setSubstModalItem] = useState(null);
   const [substSubmitting, setSubstSubmitting] = useState(false);
   const [substObservacao, setSubstObservacao] = useState("");
-  const [selecionado, setSelecionado] = useState(null);
+  const [previewSelecionado, setPreviewSelecionado] = useState(null);
   const [posseSelecionada, setPosseSelecionada] = useState(null);
   const [tabMeus, setTabMeus] = useState("kits");
   const [selectedAvulsoId, setSelectedAvulsoId] = useState("");
   const [meusAvulsos, setMeusAvulsos] = useState([]);
+  const [meusPosseKits, setMeusPosseKits] = useState([]);
   const [posseKitItens, setPosseKitItens] = useState([]);
   const [posseStatusMap, setPosseStatusMap] = useState({});
 
@@ -1028,8 +1031,7 @@ export default function App() {
     return parts.filter(Boolean).join(" • ");
   };
 
-  const kitEmPosse = kits.find((x) => String(x.id) === String(selectedKitId));
-  const meusKits = kitEmPosse ? [kitEmPosse] : [];
+  const meusKits = meusPosseKits ?? [];
   const meusAvulsosReais = meusAvulsos ?? [];
   const kitsDisponiveis = kits ?? [];
   const avulsosDisponiveis = avulsos ?? [];
@@ -1053,12 +1055,12 @@ export default function App() {
 
   useEffect(() => {
     if (!selectedKitId) {
-      setSelecionado((prev) => (prev?.tipo === "kit" ? null : prev));
+      setPreviewSelecionado((prev) => (prev?.tipo === "kit" ? null : prev));
       return;
     }
     const kit = kits.find((x) => String(x.id) === String(selectedKitId));
     if (!kit) return;
-    setSelecionado((prev) => {
+    setPreviewSelecionado((prev) => {
       if (prev?.tipo === "kit" && String(prev.data?.id) === String(kit.id)) return prev;
       return { tipo: "kit", data: kit };
     });
@@ -1189,6 +1191,24 @@ export default function App() {
   useEffect(() => {
     reloadMeusAvulsos();
   }, [reloadMeusAvulsos]);
+
+  const reloadMeusKits = useCallback(() => {
+    if (!apiBase || !selectedEncarregadoId) {
+      setMeusPosseKits([]);
+      return Promise.resolve();
+    }
+
+    return fetch(`${apiBase}/posses/kits/minha?encarregado_id=${selectedEncarregadoId}`)
+      .then((r) => (r.ok ? r.json() : Promise.reject()))
+      .then(setMeusPosseKits)
+      .catch(() => {
+        setMeusPosseKits([]);
+      });
+  }, [apiBase, selectedEncarregadoId]);
+
+  useEffect(() => {
+    reloadMeusKits();
+  }, [reloadMeusKits]);
 
   useEffect(() => {
     const hasEletrico = Boolean(currentUser?.encarregado_id);
@@ -1703,6 +1723,65 @@ export default function App() {
     });
   }
 
+  function handleSubresponsavelPickPosse(kitItemId, picked) {
+    if (kitItemId == null || !picked) return;
+    setPosseStatusMap((prev) => {
+      const cur = prev?.[kitItemId] ?? {
+        status: null,
+        subresponsavel_text: "",
+        subresponsavel_id: null,
+        distribuicao_confirmada: false,
+      };
+      return {
+        ...prev,
+        [kitItemId]: {
+          ...cur,
+          subresponsavel_id: Number(picked?.id) || null,
+          subresponsavel_text: picked?.nome || "",
+        },
+      };
+    });
+  }
+
+  function markDistribuindoPosse(kitItemId) {
+    if (kitItemId == null) return;
+    setPosseStatusMap((prev) => {
+      const cur = prev?.[kitItemId] ?? {
+        status: null,
+        subresponsavel_text: "",
+        subresponsavel_id: null,
+        distribuicao_confirmada: false,
+      };
+      return {
+        ...prev,
+        [kitItemId]: {
+          ...cur,
+          status: "DISTRIBUIDO",
+        },
+      };
+    });
+  }
+
+  function markDistribConfirmadoPosse(kitItemId) {
+    if (!kitItemId) return;
+    setPosseStatusMap((prev) => {
+      const cur = prev?.[kitItemId] ?? {
+        status: null,
+        subresponsavel_text: "",
+        subresponsavel_id: null,
+        distribuicao_confirmada: false,
+      };
+      return {
+        ...prev,
+        [kitItemId]: {
+          ...cur,
+          distribuicao_confirmada: true,
+          status: "DISTRIBUIDO",
+        },
+      };
+    });
+  }
+
   function openManualTermo(item) {
     if (!authToken) {
       setManualErr("Faca login para retirar item manual.");
@@ -1923,6 +2002,7 @@ export default function App() {
 
       toast("Solicitação de devolução enviada. Aguarde validação do admin.");
       setPosseSelecionada(null);
+      await reloadMeusKits();
     } catch (e) {
       toast(e?.message ?? "Não foi possível enviar a devolução.");
       console.error("solicitarDevolucaoKit error:", e);
@@ -2946,15 +3026,15 @@ export default function App() {
               if (!encontrado) {
                 return;
               }
-              setSelecionado({ tipo: "avulso", data: encontrado });
+              setPreviewSelecionado({ tipo: "avulso", data: encontrado });
             }}
           >
             <option value="">Selecione...</option>
-            {(avulsosDisponiveis ?? []).map((a) => (
-              <option key={a.id} value={a.id}>
-                {a.patrimonio || a.codigo || a.id} — {a.descricao || a.nome || "Avulso"}
-              </option>
-            ))}
+              {(avulsosDisponiveis ?? []).map((a) => (
+                <option key={a.id} value={a.id}>
+                  {a.patrimonio || a.codigo || a.id} - {a.descricao || a.nome || "Avulso"}
+                </option>
+              ))}
           </select>
         </div>
 
@@ -3003,9 +3083,10 @@ export default function App() {
             selectedEncarregadoId={selectedEncarregadoId}
             onSolicitarSubstituicao={handleSolicitarSubstituicao}
             onReagrupar={handleReagruparItem}
-            onPickSubresponsavel={handleSubresponsavelPick}
-            onConfirmDistribuicao={markDistribConfirmado}
+            onPickSubresponsavel={handleSubresponsavelPickPosse}
+            onConfirmDistribuicao={markDistribConfirmadoPosse}
             onSolicitarDevolucao={() => solicitarDevolucaoKit(posseSelecionada.data.id)}
+            onDistribuir={markDistribuindoPosse}
           />
         </div>
       ) : null}
@@ -3227,14 +3308,14 @@ export default function App() {
           }}
         >
           <div style={{ fontWeight: 700 }}>Detalhes (preview)</div>
-          {!selecionado ? (
+          {!previewSelecionado ? (
             <div style={{ padding: 10, fontSize: 12, opacity: 0.7 }}>
               Selecione nos superselects (disponíveis) para solicitar com termo.
             </div>
-          ) : selecionado.tipo === "kit" ? (
+          ) : previewSelecionado.tipo === "kit" ? (
             <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-              <div style={{ fontWeight: 800 }}>{selecionado.data?.nome || "Kit selecionado"}</div>
-              <div style={{ fontSize: 12, opacity: 0.8 }}>{formatKitLabel(selecionado.data)}</div>
+              <div style={{ fontWeight: 800 }}>{previewSelecionado.data?.nome || "Kit selecionado"}</div>
+              <div style={{ fontSize: 12, opacity: 0.8 }}>{formatKitLabel(previewSelecionado.data)}</div>
               <button
                 onClick={openChecklistTermo}
                 style={{
@@ -3253,14 +3334,14 @@ export default function App() {
             </div>
           ) : (
             <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-              <div style={{ fontWeight: 800 }}>
-                {selecionado.data?.descricao || selecionado.data?.patrimonio || "Avulso selecionado"}
-              </div>
-              <div style={{ fontSize: 12, opacity: 0.8 }}>
-                {selecionado.data?.status || "Selecione um avulso disponível"}
-              </div>
-              <button
-                onClick={() => openManualTermo?.(selecionado.data)}
+            <div style={{ fontWeight: 800 }}>
+              {previewSelecionado.data?.descricao || previewSelecionado.data?.patrimonio || "Avulso selecionado"}
+            </div>
+            <div style={{ fontSize: 12, opacity: 0.8 }}>
+              {previewSelecionado.data?.status || "Selecione um avulso disponível"}
+            </div>
+            <button
+              onClick={() => openManualTermo?.(previewSelecionado.data)}
                 style={{
                   alignSelf: "flex-start",
                   padding: "8px 12px",

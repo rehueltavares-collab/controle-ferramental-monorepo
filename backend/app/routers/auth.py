@@ -5,8 +5,9 @@ from pydantic import BaseModel
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
-from ..core.auth import get_db, get_current_token, require_roles, get_user_row
+from ..core.auth import get_current_token, require_roles, get_user_row
 from ..core.security import create_token, verify_password, hash_password, validate_password
+from ..database import get_db
 
 router = APIRouter(prefix="/auth", tags=["Auth"])
 

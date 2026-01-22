@@ -3,7 +3,7 @@ from __future__ import annotations
 import os
 from sqlalchemy import create_engine
 from sqlalchemy.engine import URL
-from sqlalchemy.orm import sessionmaker, declarative_base
+from sqlalchemy.orm import sessionmaker, declarative_base, Session
 
 DB_DRIVER = os.getenv("DB_DRIVER", "mysql+pymysql")
 DB_HOST = os.getenv("DB_HOST", "localhost")
@@ -27,4 +27,10 @@ engine = create_engine(
 )
 
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+def get_db():
+    db: Session = SessionLocal()
+    try:
+        yield db
+    finally:
+        db.close()
 Base = declarative_base()

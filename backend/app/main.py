@@ -14,7 +14,7 @@ from sqlalchemy.orm import Session
 # ✅ IMPORTS CERTOS (sem "backend.app...")
 from .database import SessionLocal, Base, engine
 from . import models, schemas
-from .routers import subresponsaveis, movimentos, auth, termos, manuais, admin, avulsos
+from .routers import subresponsaveis, movimentos, auth, termos, manuais, admin, avulsos, posses
 from .core.auth import get_current_token, require_roles
 from .core import security
 
@@ -100,6 +100,7 @@ app.include_router(movimentos.router, tags=["Movimentos"])
 app.include_router(manuais.router, tags=["Manuais"])
 app.include_router(admin.router, tags=["Admin"])
 app.include_router(avulsos.router, tags=["Avulsos"])
+app.include_router(posses.router)
 
 # ======================================================
 # HEALTHCHECK
