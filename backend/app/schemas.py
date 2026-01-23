@@ -116,3 +116,27 @@ class ChecklistSemanal(ChecklistSemanalBase):
 
     class Config:
         from_attributes = True
+
+
+class SolicitacaoOperacaoBase(BaseModel):
+    tipo: str
+    kit_id: Optional[int] = None
+    item_id: Optional[int] = None
+    motivo: Optional[str] = None
+    observacao: Optional[str] = None
+
+
+class SolicitacaoOperacaoCreate(SolicitacaoOperacaoBase):
+    pass
+
+
+class SolicitacaoOperacaoOut(SolicitacaoOperacaoBase):
+    id: int
+    solicitante_id: int
+    status: str
+    criado_em: datetime
+    concluido_em: Optional[datetime] = None
+    admin_id: Optional[int] = None
+
+    class Config:
+        from_attributes = True

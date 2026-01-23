@@ -762,8 +762,9 @@ function DetalhesKitCard({
         Kit: <b>{kitLabel || selectedKitId || "-"}</b>
       </div>
       {onSolicitarDevolucao && !readOnly ? (
-        <button
-          onClick={onSolicitarDevolucao}
+      <button
+        type="button"
+        onClick={onSolicitarDevolucao}
           style={{
             padding: "8px 12px",
             borderRadius: 10,
@@ -831,6 +832,7 @@ function DetalhesKitCard({
                     }}
                   >
                     <button
+                      type="button"
                       onClick={() => onSolicitarSubstituicao?.(x)}
                       disabled={!selectedKitId}
                       style={{
@@ -847,6 +849,7 @@ function DetalhesKitCard({
 
                     {isDistrib ? (
                       <button
+                        type="button"
                         onClick={() => onReagrupar?.(x)}
                         style={{
                           padding: "8px 10px",
@@ -863,6 +866,7 @@ function DetalhesKitCard({
                       </button>
                     ) : (
                       <button
+                        type="button"
                         onClick={() => onDistribuir?.(kitItemKey)}
                         disabled={!selectedKitId || !selectedEncarregadoId}
                         style={{
@@ -1037,6 +1041,9 @@ export default function App() {
   const meusAvulsosReais = meusAvulsos ?? [];
   const kitsDisponiveis = kits ?? [];
   const avulsosDisponiveis = avulsos ?? [];
+  const [pendingDevolucaoKits, setPendingDevolucaoKits] = useState(() => new Set());
+  const [pendingDevolucaoAvulsos, setPendingDevolucaoAvulsos] = useState(() => new Set());
+  const [pendingSubstituicoes, setPendingSubstituicoes] = useState(() => new Set());
   const meusKitsId = new Set((meusKits ?? []).map((k) => String(k.id)));
   const meusAvulsosId = new Set((meusAvulsosReais ?? []).map((a) => String(a.id)));
   const meusAvulsosPat = new Set(
@@ -1080,10 +1087,79 @@ export default function App() {
     });
   }, [selectedKitId, kits]);
 
+  useEffect(() => {
+    setPendingDevolucaoKits((prev) => {
+      if (!prev.size) return prev;
+      const atual = new Set((meusKits ?? []).map((k) => String(k.id)));
+      const next = new Set();
+      for (const id of prev) {
+        if (atual.has(String(id))) {
+          next.add(String(id));
+        }
+      }
+      return next;
+    });
+  }, [meusKits]);
+
+  useEffect(() => {
+    setPendingDevolucaoAvulsos((prev) => {
+      if (!prev.size) return prev;
+      const atual = new Set((meusAvulsosReais ?? []).map((a) => String(a.id)));
+      const next = new Set();
+      for (const id of prev) {
+        if (atual.has(String(id))) {
+          next.add(String(id));
+        }
+      }
+      return next;
+    });
+  }, [meusAvulsosReais]);
+
+  useEffect(() => {
+    setPendingSubstituicoes((prev) => {
+      if (!prev.size) return prev;
+      const atual = new Set((meusKits ?? []).map((k) => String(k.id)));
+      const next = new Set();
+      for (const id of prev) {
+        if (atual.has(String(id))) {
+          next.add(String(id));
+        }
+      }
+      return next;
+    });
+  }, [meusKits]);
+
   function toast(msg) {
     setUiMsg(msg);
     setTimeout(() => setUiMsg(""), 4500);
   }
+
+  const addPendingKit = (id) => {
+    if (!id) return;
+    setPendingDevolucaoKits((prev) => {
+      const next = new Set(prev);
+      next.add(String(id));
+      return next;
+    });
+  };
+
+  const addPendingAvulso = (id) => {
+    if (!id) return;
+    setPendingDevolucaoAvulsos((prev) => {
+      const next = new Set(prev);
+      next.add(String(id));
+      return next;
+    });
+  };
+
+  const addPendingSubstituicao = (id) => {
+    if (!id) return;
+    setPendingSubstituicoes((prev) => {
+      const next = new Set(prev);
+      next.add(String(id));
+      return next;
+    });
+  };
 
   // Admin panel state
   const [adminQuery, setAdminQuery] = useState("");
@@ -1122,12 +1198,15 @@ export default function App() {
     return encontrado;
   }
 
-  function handleSolicitarAvulsoComTermo() {
+  function handleSolicitarAvulsoComTermo(event) {
+    event?.preventDefault();
+    event?.stopPropagation();
     const item = previewSelecionado?.data;
     if (!item) {
+      toast("Selecione um avulso para abrir o termo.");
       return;
     }
-    openManualTermo?.(item);
+    openManualTermo(item);
   }
 
   const adminTrailLastTerm = adminTrailTerms[0] ?? null;
@@ -1628,8 +1707,16 @@ export default function App() {
       else pendente++;
     }
 
-    return { total, presente, distribuido, pendente };
-  }, [kitItens, statusMap]);
+    const pendingRequests =
+      pendingDevolucaoKits.size + pendingDevolucaoAvulsos.size + pendingSubstituicoes.size;
+
+    return {
+      total,
+      presente,
+      distribuido,
+      pendente: pendente + pendingRequests,
+    };
+  }, [kitItens, statusMap, pendingDevolucaoKits, pendingDevolucaoAvulsos, pendingSubstituicoes]);
 
   function buildManualTermoTexto(itemName) {
     const parts = [
@@ -2012,6 +2099,8 @@ export default function App() {
   }
 
   async function solicitarDevolucaoKit(kitId) {
+    console.log("CLICK DEVOLUCAO KIT", kitId);
+    toast(`DEVOLUCAO KIT click: ${kitId ?? "sem id"}`);
     if (!kitId) {
       toast("Kit inválido para devolução.");
       return;
@@ -2022,7 +2111,7 @@ export default function App() {
     }
 
     try {
-      const resp = await fetch(`${apiBase}/solicitacoes/operacao`, {
+      const resp = await fetch(`${apiBase}/solicitacoes/operacao/`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -2041,6 +2130,7 @@ export default function App() {
 
       toast("Solicitação de devolução enviada. Aguarde validação do admin.");
       setPosseSelecionada(null);
+      addPendingKit(kitId);
       await reloadMeusKits();
     } catch (e) {
       toast(e?.message ?? "Não foi possível enviar a devolução.");
@@ -2049,6 +2139,8 @@ export default function App() {
   }
 
   async function solicitarDevolucaoAvulso(itemId) {
+    console.log("CLICK DEVOLUCAO AVULSO", itemId);
+    toast(`DEVOLUCAO AVULSO click: ${itemId ?? "sem id"}`);
     if (!itemId) {
       toast("Avulso inválido para devolução.");
       return;
@@ -2059,7 +2151,7 @@ export default function App() {
     }
 
     try {
-      const resp = await fetch(`${apiBase}/solicitacoes/operacao`, {
+        const resp = await fetch(`${apiBase}/solicitacoes/operacao/`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -2078,6 +2170,7 @@ export default function App() {
 
       toast("Solicitação de devolução enviada. Aguarde validação do admin.");
       setPosseSelecionada(null);
+      addPendingAvulso(itemId);
       await reloadMeusAvulsos();
     } catch (e) {
       toast(e?.message ?? "Não foi possível enviar a devolução.");
@@ -2093,20 +2186,49 @@ export default function App() {
   }
 
   async function submitSolicitacaoSubstituicao(motivo) {
+    console.log("CLICK SUBSTITUICAO", substModalItem);
+    toast("SUBSTITUICAO click");
     if (!selectedKitId || !substModalItem) return;
 
     if (!["MANUTENCAO", "FURTO"].includes(motivo)) return;
 
+    if (!authToken) {
+      toast("Faça login antes de solicitar substituição.");
+      return;
+    }
+
     setSubstSubmitting(true);
+    const substItemId = Number(
+      substModalItem.item_id ?? substModalItem.id ?? substModalItem.kit_item_id
+    );
+    if (!substItemId) {
+      toast("Item inválido para substituição.");
+      setSubstSubmitting(false);
+      return;
+    }
     try {
-      await apiPost("/solicitacoes/substituicao", {
-        kit_id: Number(selectedKitId),
-        kit_item_id: Number(substModalItem.kit_item_id),
-        patrimonio: String(substModalItem.patrimonio),
-        motivo,
-        observacao: substObservacao ? `PWA: ${substObservacao}` : "PWA",
+        const resp = await fetch(`${apiBase}/solicitacoes/operacao/`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${authToken}`,
+        },
+        body: JSON.stringify({
+          tipo: "SUBSTITUICAO_ITEM",
+          kit_id: Number(selectedKitId),
+          item_id: substItemId,
+          motivo,
+          observacao: substObservacao ? `PWA: ${substObservacao}` : "PWA",
+        }),
       });
+
+      if (!resp.ok) {
+        const err = await resp.json().catch(() => null);
+        throw new Error(err?.detail ?? err?.message ?? resp.statusText);
+      }
+
       toast("Solicitação de substituição enviada. Admin vai escolher equivalente e validar com PIN.");
+      addPendingSubstituicao(selectedKitId);
       setSubstModalItem(null);
     } catch (e) {
       toast("Não consegui registrar no backend (endpoint de substituição ainda não confirmado).");
@@ -3152,7 +3274,26 @@ export default function App() {
                           >
                             <div>
                               <div style={{ fontWeight: 800 }}>{kit.nome}</div>
-                              <div style={{ fontSize: 12, opacity: 0.7 }}>{formatKitLabel(kit)}</div>
+                              <div style={{ fontSize: 12, opacity: 0.7, display: "flex", alignItems: "center", gap: 6 }}>
+                                {formatKitLabel(kit)}
+                                {pendingDevolucaoKits.has(String(kit.id)) ? (
+                                  <span
+                                    style={{
+                                      display: "inline-block",
+                                      marginTop: 6,
+                                      padding: "3px 8px",
+                                      borderRadius: 999,
+                                      fontSize: 12,
+                                      fontWeight: 800,
+                                      background: "rgba(255, 207, 51, 0.14)",
+                                      border: "1px solid rgba(255, 207, 51, 0.35)",
+                                      color: "#ffcf33",
+                                    }}
+                                  >
+                                    Devolução solicitada
+                                  </span>
+                                ) : null}
+                              </div>
                             </div>
                             <button
                               onClick={(e) => {
@@ -3206,8 +3347,25 @@ export default function App() {
                           >
                             <div>
                               <div style={{ fontWeight: 800 }}>{avulso.nome || avulso.patrimonio}</div>
-                              <div style={{ fontSize: 12, opacity: 0.75 }}>
+                              <div style={{ fontSize: 12, opacity: 0.75, display: "flex", alignItems: "center", gap: 6 }}>
                                 {avulso.status || "Presente sob sua responsabilidade"}
+                                {pendingDevolucaoAvulsos.has(String(avulso.id)) ? (
+                                  <span
+                                    style={{
+                                      display: "inline-block",
+                                      marginTop: 6,
+                                      padding: "3px 8px",
+                                      borderRadius: 999,
+                                      fontSize: 12,
+                                      fontWeight: 800,
+                                      background: "rgba(255, 207, 51, 0.14)",
+                                      border: "1px solid rgba(255, 207, 51, 0.35)",
+                                      color: "#ffcf33",
+                                    }}
+                                  >
+                                    Devolução solicitada
+                                  </span>
+                                ) : null}
                               </div>
                             </div>
                             <button
@@ -3289,8 +3447,9 @@ export default function App() {
                       <div style={{ fontSize: 12, opacity: 0.75 }}>
                         {posseSelecionada.data?.patrimonio}
                       </div>
-                      <button
-                        onClick={() => solicitarDevolucaoAvulso(posseSelecionada.data.id)}
+                        <button
+                          type="button"
+                          onClick={() => solicitarDevolucaoAvulso(posseSelecionada.data.id)}
                         style={{
                           marginTop: 12,
                           padding: "8px 12px",
@@ -3370,6 +3529,7 @@ export default function App() {
                 <div style={{ fontWeight: 800 }}>{previewSelecionado.data?.nome || "Kit selecionado"}</div>
                 <div style={{ fontSize: 12, opacity: 0.8 }}>{formatKitLabel(previewSelecionado.data)}</div>
                 <button
+                  type="button"
                   onClick={openChecklistTermo}
                   style={{
                     alignSelf: "flex-start",
@@ -3394,6 +3554,7 @@ export default function App() {
                   {previewSelecionado.data?.status || "Selecione um avulso disponível"}
                 </div>
                     <button
+                      type="button"
                       onClick={handleSolicitarAvulsoComTermo}
                       style={{
                         alignSelf: "flex-start",

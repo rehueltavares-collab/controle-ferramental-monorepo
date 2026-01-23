@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from sqlalchemy import Column, Integer, String, ForeignKey, DateTime, Float, Text
+from sqlalchemy import Column, Integer, String, ForeignKey, DateTime, Float, Text, func
 from sqlalchemy.orm import relationship
 
 from .database import Base
@@ -83,3 +83,25 @@ class ChecklistSemanal(Base):
 
     kit = relationship("Kit", back_populates="checklists")
     encarregado = relationship("Encarregado", back_populates="checklists")
+
+
+class SolicitacaoOperacao(Base):
+    __tablename__ = "solicitacoes_operacao"
+
+    id = Column(Integer, primary_key=True, index=True)
+    tipo = Column(String(30), nullable=False)
+
+    kit_id = Column(Integer, ForeignKey("kits.id"), nullable=True)
+    item_id = Column(Integer, ForeignKey("itens.id"), nullable=True)
+
+    motivo = Column(String(255), nullable=True)
+    observacao = Column(Text, nullable=True)
+
+    solicitante_id = Column("solicitante_user_id", Integer, nullable=False)
+
+    status = Column(String(20), nullable=False, default="PENDENTE")
+
+    criado_em = Column(DateTime, server_default=func.current_timestamp(), nullable=False)
+    concluido_em = Column(DateTime, nullable=True)
+
+    admin_id = Column("admin_user_id", Integer, nullable=True)
