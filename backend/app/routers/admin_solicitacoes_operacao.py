@@ -23,7 +23,13 @@ def listar_solicitacoes_operacao(
     return query.order_by(models.SolicitacaoOperacao.criado_em.desc()).all()
 
 
-def _atualizar_status(request_id: int, novo_status: str, admin_id: int, db: Session):
+def _atualizar_status(
+    request_id: int,
+    novo_status: str,
+    admin_id: int,
+    db: Session,
+    observacao: Optional[str] = None,
+):
     solicitacao = db.get(models.SolicitacaoOperacao, request_id)
     if not solicitacao:
         raise HTTPException(status_code=404, detail="Solicitacao nao encontrada")
@@ -32,6 +38,8 @@ def _atualizar_status(request_id: int, novo_status: str, admin_id: int, db: Sess
 
     solicitacao.status = novo_status
     solicitacao.admin_id = admin_id
+    if observacao is not None:
+        solicitacao.observacao = observacao
     solicitacao.concluido_em = datetime.utcnow()
     db.add(solicitacao)
     db.commit()
@@ -42,16 +50,30 @@ def _atualizar_status(request_id: int, novo_status: str, admin_id: int, db: Sess
 @router.post("/{solicitacao_id}/aprovar", response_model=schemas.SolicitacaoOperacaoOut)
 def aprovar_solicitacao_operacao(
     solicitacao_id: int,
+    body: schemas.SolicitacaoOperacaoUpdate,
     db: Session = Depends(get_db),
     payload: dict = Depends(require_roles(["admin"])),
 ):
-    return _atualizar_status(solicitacao_id, "APROVADA", int(payload["uid"]), db)
+    return _atualizar_status(
+        solicitacao_id,
+        "APROVADA",
+        int(payload["uid"]),
+        db,
+        body.observacao,
+    )
 
 
 @router.post("/{solicitacao_id}/rejeitar", response_model=schemas.SolicitacaoOperacaoOut)
 def rejeitar_solicitacao_operacao(
     solicitacao_id: int,
+    body: schemas.SolicitacaoOperacaoUpdate,
     db: Session = Depends(get_db),
     payload: dict = Depends(require_roles(["admin"])),
 ):
-    return _atualizar_status(solicitacao_id, "REJEITADA", int(payload["uid"]), db)
+    return _atualizar_status(
+        solicitacao_id,
+        "REJEITADA",
+        int(payload["uid"]),
+        db,
+        body.observacao,
+    )

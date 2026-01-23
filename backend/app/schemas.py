@@ -140,3 +140,7 @@ class SolicitacaoOperacaoOut(SolicitacaoOperacaoBase):
 
     class Config:
         from_attributes = True
+
+
+class SolicitacaoOperacaoUpdate(BaseModel):
+    observacao: Optional[str] = None
