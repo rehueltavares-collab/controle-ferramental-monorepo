@@ -1,18 +1,18 @@
 param(
   [string]$Base = "https://api-ferramental.local:8000",
-  [int]$KitId = 8
+  [int]$KitId = 8,
+  [ValidateSet("REJEITAR","APROVAR")]
+  [string]$Acao = "REJEITAR"
 )
 
-# Estamos em: backend/scripts/http
-# Subir para: backend/
 $BackendRoot = (Resolve-Path (Join-Path $PSScriptRoot "..\..")).Path
 Set-Location $BackendRoot | Out-Null
 
-$LoginRehuel   = "scripts/http/login_rehuel.json"
-$LoginAdmin    = "scripts/http/login_admin.json"
-$BodyDevKit    = "scripts/http/body_dev_kit.json"
-$AdminRejeitar = "scripts/http/admin_rejeitar.json"
-$AdminAprovar  = "scripts/http/admin_aprovar.json"
+$LoginRehuel    = "scripts/http/login_rehuel.json"
+$LoginAdmin     = "scripts/http/login_admin.json"
+$BodyDevKit     = "scripts/http/body_dev_kit.json"
+$AdminRejeitar  = "scripts/http/admin_rejeitar.json"
+$AdminAprovar   = "scripts/http/admin_aprovar.json"
 
 function Assert-File($p) {
   if (-not (Test-Path $p)) { throw "Arquivo não encontrado: $p (cwd=$((Get-Location).Path))" }
@@ -21,6 +21,7 @@ function Assert-File($p) {
 Assert-File $LoginRehuel
 Assert-File $LoginAdmin
 Assert-File $AdminRejeitar
+Assert-File $AdminAprovar
 
 # 1) Login funcionário
 $login = curl.exe -k -s -X POST "$Base/auth/login" `
@@ -54,15 +55,21 @@ if (-not $tokenA) { throw "Falha no login admin. Resposta: $loginA" }
 # 4) Listar pendentes
 $pendentesJson = curl.exe -k -s "$Base/admin/solicitacoes/operacao/?status=PENDENTE" `
   -H "Authorization: Bearer $tokenA"
-
 $pendentes = $pendentesJson | ConvertFrom-Json
 $pendentes | Select-Object id,tipo,kit_id,item_id,status,criado_em | Format-Table -AutoSize
 
-# 5) Rejeitar a recém-criada (troque para aprovar se quiser)
+# 5) Decidir a recém-criada
 $solId = $created.id
-$rejeitadaJson = curl.exe -k -s -X POST "$Base/admin/solicitacoes/operacao/$solId/rejeitar" `
-  -H "Authorization: Bearer $tokenA" `
-  -H "Content-Type: application/json" `
-  --data-binary "@$AdminRejeitar"
-
-"REJEITADA: $rejeitadaJson"
+if ($Acao -eq "APROVAR") {
+  $resp = curl.exe -k -s -X POST "$Base/admin/solicitacoes/operacao/$solId/aprovar" `
+    -H "Authorization: Bearer $tokenA" `
+    -H "Content-Type: application/json" `
+    --data-binary "@$AdminAprovar"
+  "APROVADA: $resp"
+} else {
+  $resp = curl.exe -k -s -X POST "$Base/admin/solicitacoes/operacao/$solId/rejeitar" `
+    -H "Authorization: Bearer $tokenA" `
+    -H "Content-Type: application/json" `
+    --data-binary "@$AdminRejeitar"
+  "REJEITADA: $resp"
+}
