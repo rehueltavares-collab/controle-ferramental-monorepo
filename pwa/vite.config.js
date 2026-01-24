@@ -17,5 +17,10 @@ export default defineConfig({
       'ferramental.perfilx.corp',
       'localhost',
     ],
+    hmr: {
+      protocol: 'wss',
+      host: 'api-ferramental.local',
+      clientPort: 5173,
+    },
   },
 })

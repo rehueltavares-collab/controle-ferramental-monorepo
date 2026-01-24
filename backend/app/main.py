@@ -9,6 +9,7 @@ load_dotenv()
 
 from fastapi import FastAPI, Depends
 from fastapi.middleware.cors import CORSMiddleware
+from starlette.middleware.trustedhost import TrustedHostMiddleware
 from sqlalchemy.orm import Session
 
 # ✅ IMPORTS CERTOS (sem "backend.app...")
@@ -25,6 +26,7 @@ from .routers import (
     posses,
     solicitacoes_operacao,
     admin_solicitacoes_operacao,
+    status_overview,
 )
 from .core.auth import get_current_token, require_roles
 from .core import security
@@ -59,33 +61,56 @@ def debug_jwt2():
     }
 
 # ======================================================
-# CORS – LIBERADO PARA REDE (DEV INTERNO)
+# CORS / TrustedHost (ALLOWED_HOSTS)
+# Opção A: Front chama /api (mesmo host) -> quase zero dor de CORS
 # ======================================================
+
 def _parse_env_list(name: str) -> list[str]:
     raw = os.getenv(name, "")
     return [entry.strip() for entry in raw.split(",") if entry.strip()]
 
+ENV = os.getenv("ENV", "dev").lower()
+
 DEFAULT_CORS_ORIGINS = [
     "http://localhost:5173",
     "http://127.0.0.1:5173",
-    "http://localhost:5174",
-    "http://127.0.0.1:5174",
-    "http://localhost:3000",
-    "http://127.0.0.1:3000",
-    # Se quiser travar em IP específico, pode deixar só os seus aqui
-    "http://192.168.0.130:5173",
-    "http://192.168.0.154:5173",
+    "https://localhost:5173",
+    "https://127.0.0.1:5173",
 ]
+
 origins = _parse_env_list("CORS_ORIGINS") or DEFAULT_CORS_ORIGINS
-app.add_middleware(
-    CORSMiddleware,
+
+cors_kwargs = dict(
     allow_origins=origins,
-    # ✅ libera qualquer host local/lan em DEV (evita ficar editando IP toda hora)
-    allow_origin_regex=r"^https?://(localhost|127\.0\.0\.1|192\.168\.\d{1,3}\.\d{1,3}|ferramental\.local|ferramental\.perfilx\.corp)(:\d+)?$",
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# DEV/LOCAL: libera LAN + domínios internos sem editar .env toda hora
+if ENV in ("dev", "local"):
+    cors_kwargs["allow_origin_regex"] = (
+        r"^https?://("
+        r"localhost|127\.0\.0\.1|"
+        r"192\.168\.\d{1,3}\.\d{1,3}|"
+        r"ferramental\.local|"
+        r"ferramental\.perfilx\.corp|"
+        r"ferramentas\.perfilx\.com\.br"
+        r")(:\d+)?$"
+    )
+
+app.add_middleware(CORSMiddleware, **cors_kwargs)
+
+DEFAULT_ALLOWED_HOSTS = [
+    "localhost",
+    "127.0.0.1",
+    "api-ferramental.local",
+    "ferramental.local",
+    "ferramentas.perfilx.com.br",
+]
+
+allowed_hosts = _parse_env_list("ALLOWED_HOSTS") or DEFAULT_ALLOWED_HOSTS
+app.add_middleware(TrustedHostMiddleware, allowed_hosts=allowed_hosts)
 
 # ======================================================
 # DATABASE
@@ -114,6 +139,7 @@ app.include_router(avulsos.router, tags=["Avulsos"])
 app.include_router(posses.router)
 app.include_router(solicitacoes_operacao.router)
 app.include_router(admin_solicitacoes_operacao.router)
+app.include_router(status_overview.router)
 
 # ======================================================
 # HEALTHCHECK

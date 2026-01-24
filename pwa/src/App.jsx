@@ -36,6 +36,33 @@ function nowISO() {
   return new Date().toISOString();
 }
 
+const LS_TRANSIT = "kitsEmTransicao_v1";
+
+function getTransitSet() {
+  try {
+    const arr = JSON.parse(localStorage.getItem(LS_TRANSIT) || "[]");
+    return new Set(arr.map((id) => Number(id)));
+  } catch {
+    return new Set();
+  }
+}
+
+function addTransit(kitId) {
+  const s = getTransitSet();
+  s.add(Number(kitId));
+  localStorage.setItem(LS_TRANSIT, JSON.stringify([...s]));
+}
+
+function removeTransit(kitId) {
+  const s = getTransitSet();
+  s.delete(Number(kitId));
+  localStorage.setItem(LS_TRANSIT, JSON.stringify([...s]));
+}
+
+function isTransit(kitId) {
+  return getTransitSet().has(Number(kitId));
+}
+
 function safeArray(res) {
   // Backend pode retornar [] puro ou {value: []}
   if (Array.isArray(res)) return res;
@@ -674,7 +701,13 @@ function Pill({ label, value }) {
   );
 }
 
-function SolicitacoesCard({ totals, items, statusMap, selectedKitId }) {
+function SolicitacoesCard({
+  items,
+  statusMap,
+  selectedKitId,
+  statusOverview,
+  statusOverviewErr,
+}) {
   const pendentes = useMemo(() => {
     if (!selectedKitId) return [];
     return (items ?? []).filter((x) => {
@@ -689,13 +722,28 @@ function SolicitacoesCard({ totals, items, statusMap, selectedKitId }) {
       subtitle="Painel situacional: leitura apenas, sem CTAs."
       right={
         <div style={{ display: "flex", gap: 8, flexWrap: "wrap", justifyContent: "flex-end" }}>
-          <Pill label="Total" value={totals?.total} />
-          <Pill label="Presente" value={totals?.presente} />
-          <Pill label="Distribuído" value={totals?.distribuido} />
-          <Pill label="Pendente" value={totals?.pendente} />
+          <Pill label="Itens" value={statusOverview?.total_items ?? "-"} />
+          <Pill label="Presente" value={statusOverview?.present ?? "-"} />
+          <Pill label="Distribuído" value={statusOverview?.distributed ?? "-"} />
+          <Pill label="Pendente Itens" value={statusOverview?.pending_items ?? "-"} />
+
+          <Pill label="Pend. Devolução" value={statusOverview?.pending_devolucao ?? "-"} />
+          <Pill label="Pend. Substituição" value={statusOverview?.pending_substituicao ?? "-"} />
+          <Pill label="Pend. Termo" value={statusOverview?.pending_termo ?? "-"} />
+
+          {/* Opcional: pendências locais do navegador (não depende do backend) */}
+          <Pill label="Transição (local)" value={getTransitSet().size} />
+          {/* Se você implementar fila GPS depois, isso vira Pill de pendingOps */}
+          {/* <Pill label="GPS (local)" value={getPendingGpsOps().length} /> */}
         </div>
       }
     >
+      {statusOverviewErr ? (
+        <div style={{ padding: 10, border: "1px solid #f3c9c9", borderRadius: 12, fontSize: 12 }}>
+          {statusOverviewErr}
+        </div>
+      ) : null}
+
       <div style={{ fontSize: 12, opacity: 0.8 }}>
         Pendências locais (kit precisa estar íntegro para liberar o termo):
       </div>
@@ -947,6 +995,21 @@ export default function App() {
   const [newPassErr, setNewPassErr] = useState("");
   const [newPassLoading, setNewPassLoading] = useState(false);
 
+  const [statusOverview, setStatusOverview] = useState(null);
+  const [statusOverviewErr, setStatusOverviewErr] = useState("");
+
+  const refreshStatusOverview = useCallback(async () => {
+    if (!authToken) return;
+    try {
+      setStatusOverviewErr("");
+      const j = await apiGet("/status/overview");
+      setStatusOverview(j);
+    } catch (e) {
+      console.warn("Falha ao carregar /status/overview:", e);
+      setStatusOverviewErr(e?.message ?? "Falha ao carregar status/overview");
+    }
+  }, [authToken]);
+
 
 
 
@@ -1052,7 +1115,7 @@ export default function App() {
       .filter(Boolean)
   );
   const kitsDisponiveisFiltrados = (kitsDisponiveis ?? []).filter(
-    (k) => !meusKitsId.has(String(k.id))
+    (k) => !meusKitsId.has(String(k.id)) && !isTransit(k.id)
   );
   const avulsosDisponiveisFiltrados = (avulsosDisponiveis ?? []).filter((a) => {
     const idOk = !meusAvulsosId.has(String(a.id));
@@ -1273,6 +1336,27 @@ export default function App() {
         setCurrentUserLoading(false);
       });
   }, [authToken]);
+
+  useEffect(() => {
+    if (!authToken) return;
+    refreshStatusOverview();
+  }, [authToken, refreshStatusOverview]);
+
+  useEffect(() => {
+    if (!authToken) return;
+
+    const t = setInterval(() => {
+      refreshStatusOverview();
+    }, 15000);
+
+    const onFocus = () => refreshStatusOverview();
+    window.addEventListener("focus", onFocus);
+
+    return () => {
+      clearInterval(t);
+      window.removeEventListener("focus", onFocus);
+    };
+  }, [authToken, refreshStatusOverview]);
 
   useEffect(() => {
     const encId = currentUser?.encarregado_id;
@@ -1991,6 +2075,18 @@ export default function App() {
       return;
     }
 
+    if (!selectedKitId) {
+      setChecklistTermoMsg("Selecione um kit antes de solicitar o termo.");
+      return;
+    }
+
+    if (isTransit(selectedKitId)) {
+      setChecklistTermoMsg("Esse kit já está em transição (solicitação pendente).");
+      return;
+    }
+
+    addTransit(selectedKitId);
+
     setChecklistTermoSubmitting(true);
     setChecklistTermoMsg("");
     try {
@@ -2005,9 +2101,18 @@ export default function App() {
       };
 
       await criarTermo(termoPayload);
+
+      try {
+        await submitChecklist();
+      } catch (e2) {
+        console.warn("Checklist semanal falhou após termo:", e2);
+        setChecklistTermoMsg("Termo criado, mas falha no checklist semanal. Tente reenviar.");
+      }
+
       setChecklistTermoOpen(false);
-      await submitChecklist();
+      setChecklistTermoMsg("Solicitação enviada. Kit em transição.");
     } catch (e) {
+      removeTransit(selectedKitId);
       setChecklistTermoMsg(e?.message ?? "Falha ao salvar termo do checklist.");
     } finally {
       setChecklistTermoSubmitting(false);
@@ -3175,10 +3280,11 @@ export default function App() {
         >
           <div>
             <SolicitacoesCard
-              totals={totals}
               items={filtered}
               statusMap={statusMap}
               selectedKitId={selectedKitId}
+              statusOverview={statusOverview}
+              statusOverviewErr={statusOverviewErr}
             />
           </div>
           <div
