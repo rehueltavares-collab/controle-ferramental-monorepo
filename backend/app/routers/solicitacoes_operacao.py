@@ -1,4 +1,6 @@
-from fastapi import APIRouter, Depends, HTTPException
+from typing import List, Optional
+
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 
 from ..database import get_db
@@ -8,6 +10,20 @@ from ..core.auth import require_roles
 router = APIRouter(prefix="/solicitacoes/operacao", tags=["SolicitacoesOperacao"])
 
 VALID_TIPOS = {"DEVOLUCAO_KIT", "DEVOLUCAO_AVULSO", "SUBSTITUICAO_ITEM"}
+
+
+@router.get("/minhas", response_model=List[schemas.SolicitacaoOperacaoOut])
+def listar_solicitacoes_minhas(
+    status: Optional[str] = Query("PENDENTE"),
+    db: Session = Depends(get_db),
+    payload: dict = Depends(require_roles(["admin", "manutencao", "funcionario"])),
+):
+    query = db.query(models.SolicitacaoOperacao).filter(
+        models.SolicitacaoOperacao.solicitante_id == int(payload["uid"])
+    )
+    if status:
+        query = query.filter(models.SolicitacaoOperacao.status == status)
+    return query.order_by(models.SolicitacaoOperacao.criado_em.desc()).all()
 
 
 @router.post("/", response_model=schemas.SolicitacaoOperacaoOut)

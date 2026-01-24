@@ -37,6 +37,7 @@ function nowISO() {
 }
 
 const LS_TRANSIT = "kitsEmTransicao_v1";
+const LS_PENDING_OPS = "pendingOps_v1";
 
 function getTransitSet() {
   try {
@@ -61,6 +62,37 @@ function removeTransit(kitId) {
 
 function isTransit(kitId) {
   return getTransitSet().has(Number(kitId));
+}
+
+function getPendingOps() {
+  try {
+    const arr = JSON.parse(localStorage.getItem(LS_PENDING_OPS) || "[]");
+    return Array.isArray(arr) ? arr : [];
+  } catch {
+    return [];
+  }
+}
+
+function setPendingOpsStorage(list) {
+  localStorage.setItem(LS_PENDING_OPS, JSON.stringify(list));
+}
+
+function buildPendingKey(op) {
+  const type = String(op?.type ?? "").trim().toUpperCase();
+  const kitId = op?.payload?.kit_id ?? "";
+  const itemId = op?.payload?.item_id ?? "";
+  const pat = (op?.payload?.patrimonio ?? "").toString().trim();
+  return `${type}|${kitId}|${itemId}|${pat}`;
+}
+
+function buildPendingId() {
+  return `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+}
+
+function buildRecolherKey(kitId, patrimonio) {
+  const k = kitId ?? "";
+  const p = (patrimonio ?? "").toString().trim();
+  return `${k}|${p}`;
 }
 
 function safeArray(res) {
@@ -785,6 +817,8 @@ function DetalhesKitCard({
   onSolicitarSubstituicao,
   onSolicitarDevolucao,
   onDistribuir,
+  pendingDevolucaoKits,
+  pendingSubstituicoes,
   readOnly = false,
 }) {
   const renderStatus = (st) => {
@@ -795,14 +829,64 @@ function DetalhesKitCard({
           <b style={{ color: st.distribuicao_confirmada ? "#0b7a38" : "#b00020" }}>
             {st.distribuicao_confirmada ? "OK" : "PENDENTE"}
           </b>
+          {st.sync_pending ? (
+            <span style={{ marginLeft: 6, fontWeight: 700, color: "#b00020" }}>Pend. Sync</span>
+          ) : null}
+        </span>
+      );
+    }
+    if (st?.status === "DISTRIBUINDO") {
+      return (
+        <span style={{ fontSize: 12, opacity: 0.85 }}>
+          Distribuição pendente de PIN.
+          {st.sync_pending ? (
+            <span style={{ marginLeft: 6, fontWeight: 700, color: "#b00020" }}>Pend. Sync</span>
+          ) : null}
         </span>
       );
     }
     if (st?.status === "PRESENTE") {
-      return <span style={{ fontSize: 12, opacity: 0.85 }}>Presente sob sua responsabilidade.</span>;
+      return (
+        <span style={{ fontSize: 12, opacity: 0.85 }}>
+          Presente sob sua responsabilidade.
+          {st.sync_pending ? (
+            <span style={{ marginLeft: 6, fontWeight: 700, color: "#b00020" }}>Pend. Sync</span>
+          ) : null}
+        </span>
+      );
     }
     return <span style={{ fontSize: 12, opacity: 0.85 }}>Pendente</span>;
   };
+
+  const kitIdKey = selectedKitId ? String(selectedKitId) : "";
+  const kitHasPendingDevolucao =
+    kitIdKey && pendingDevolucaoKits?.has(kitIdKey);
+
+  const kitHasPendingSubstituicao = (items ?? []).some((it) => {
+    const itemId = it?.item_id ?? it?.id ?? null;
+    return itemId != null && pendingSubstituicoes?.has(String(itemId));
+  });
+
+  const itensDistribuidos = (items ?? []).filter((x) => {
+    const kitItemKey = x.kit_item_id ?? x.id ?? null;
+    const st = kitItemKey != null ? statusMap?.[kitItemKey]?.status : null;
+    return st === "DISTRIBUIDO" || st === "DISTRIBUINDO";
+  });
+
+  let devolucaoBlockedReason = "";
+  if (kitHasPendingDevolucao) {
+    devolucaoBlockedReason = "Devolução solicitada (aguardando admin).";
+  } else if (kitHasPendingSubstituicao) {
+    devolucaoBlockedReason = "Substituição pendente neste kit.";
+  } else if (itensDistribuidos.length) {
+    const items = itensDistribuidos.map((it) => it.patrimonio).filter(Boolean);
+    devolucaoBlockedReason = items.length
+      ? `Reagrupe antes de solicitar devolução: ${items.join(", ")}.`
+      : "Reagrupe os itens distribuídos antes de solicitar devolução.";
+  }
+
+  const canSolicitarDevolucao =
+    !kitHasPendingDevolucao && !kitHasPendingSubstituicao && itensDistribuidos.length === 0;
 
   const headerRight = (
     <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 6 }}>
@@ -810,21 +894,27 @@ function DetalhesKitCard({
         Kit: <b>{kitLabel || selectedKitId || "-"}</b>
       </div>
       {onSolicitarDevolucao && !readOnly ? (
-      <button
-        type="button"
-        onClick={onSolicitarDevolucao}
-          style={{
-            padding: "8px 12px",
-            borderRadius: 10,
-            border: "1px solid #b00020",
-            background: "#b00020",
-            color: "#fff",
-            fontWeight: 900,
-            cursor: "pointer",
-          }}
-        >
-          Solicitar devolução
-        </button>
+        canSolicitarDevolucao ? (
+          <button
+            type="button"
+            onClick={onSolicitarDevolucao}
+            style={{
+              padding: "8px 12px",
+              borderRadius: 10,
+              border: "1px solid #b00020",
+              background: "#b00020",
+              color: "#fff",
+              fontWeight: 900,
+              cursor: "pointer",
+            }}
+          >
+            Solicitar devolução
+          </button>
+        ) : (
+          <div style={{ fontSize: 12, opacity: 0.75, textAlign: "right", maxWidth: 260 }}>
+            {devolucaoBlockedReason}
+          </div>
+        )
       ) : null}
     </div>
   );
@@ -849,8 +939,14 @@ function DetalhesKitCard({
               subresponsavel_text: "",
               subresponsavel_id: null,
               distribuicao_confirmada: false,
+              sync_pending: false,
             };
-            const isDistrib = st.status === "DISTRIBUIDO";
+            const isDistribuindo = st.status === "DISTRIBUINDO";
+            const isDistribuidoOk = st.status === "DISTRIBUIDO" && st.distribuicao_confirmada;
+            const itemId = x.item_id ?? x.id ?? null;
+            const hasPendingSubst =
+              itemId != null && pendingSubstituicoes?.has(String(itemId));
+            const isSyncPending = Boolean(st.sync_pending);
 
             return (
               <div
@@ -882,31 +978,40 @@ function DetalhesKitCard({
                     <button
                       type="button"
                       onClick={() => onSolicitarSubstituicao?.(x)}
-                      disabled={!selectedKitId}
+                      disabled={!selectedKitId || hasPendingSubst || isSyncPending}
                       style={{
                         padding: "8px 10px",
                         borderRadius: 10,
                         border: "1px solid #111",
                         background: "#fff",
-                        cursor: selectedKitId ? "pointer" : "not-allowed",
+                        cursor:
+                          selectedKitId && !hasPendingSubst && !isSyncPending
+                            ? "pointer"
+                            : "not-allowed",
                         fontWeight: 900,
                       }}
                     >
-                      Solicitar substituição
+                      {hasPendingSubst
+                        ? "Substituição pendente"
+                        : isSyncPending
+                          ? "Pend. Sync"
+                          : "Solicitar substituição"}
                     </button>
 
-                    {isDistrib ? (
+                    {isDistribuidoOk ? (
                       <button
                         type="button"
                         onClick={() => onReagrupar?.(x)}
+                        disabled={isSyncPending}
                         style={{
                           padding: "8px 10px",
                           borderRadius: 10,
                           border: "1px solid #111",
                           background: "#111",
                           color: "#fff",
-                          cursor: "pointer",
+                          cursor: isSyncPending ? "not-allowed" : "pointer",
                           fontWeight: 900,
+                          opacity: isSyncPending ? 0.7 : 1,
                         }}
                         title="Reagrupar item distribuído ao kit"
                       >
@@ -916,25 +1021,42 @@ function DetalhesKitCard({
                       <button
                         type="button"
                         onClick={() => onDistribuir?.(kitItemKey)}
-                        disabled={!selectedKitId || !selectedEncarregadoId}
+                        disabled={
+                          !selectedKitId ||
+                          !selectedEncarregadoId ||
+                          isSyncPending ||
+                          isDistribuindo ||
+                          hasPendingSubst
+                        }
                         style={{
                           padding: "8px 10px",
                           borderRadius: 10,
                           border: "1px solid #111",
                           background: "#111",
                           color: "#fff",
-                          cursor: !selectedKitId || !selectedEncarregadoId ? "not-allowed" : "pointer",
+                          cursor:
+                            !selectedKitId ||
+                            !selectedEncarregadoId ||
+                            isSyncPending ||
+                            isDistribuindo ||
+                            hasPendingSubst
+                              ? "not-allowed"
+                              : "pointer",
                           fontWeight: 900,
+                          opacity: isSyncPending ? 0.7 : 1,
                         }}
                         title="Preparar distribuição (seleciona subresponsável + PIN)"
                       >
-                        Distribuir
+                        {isDistribuindo ? "Aguardando PIN" : "Distribuir"}
                       </button>
                     )}
                   </div>
                 )}
 
-                {!readOnly && isDistrib ? (
+                {!readOnly &&
+                (isDistribuindo ||
+                  (st.status === "DISTRIBUIDO" && !st.distribuicao_confirmada)) &&
+                !isSyncPending ? (
                   <div style={{ marginTop: 4 }}>
                     <SubresponsavelPicker
                       kitId={selectedKitId}
@@ -1013,6 +1135,7 @@ export default function App() {
 
 
 
+
   /**
    * Dados mestres
    */
@@ -1080,7 +1203,10 @@ export default function App() {
   const [uiMsg, setUiMsg] = useState("");
 
   const distributedItems = useMemo(() => {
-    return (kitItens ?? []).filter((x) => statusMap?.[x.kit_item_id]?.status === "DISTRIBUIDO");
+    return (kitItens ?? []).filter((x) => {
+      const st = statusMap?.[x.kit_item_id]?.status;
+      return st === "DISTRIBUIDO" || st === "DISTRIBUINDO";
+    });
   }, [kitItens, statusMap]);
 
   const kitLabel = useMemo(() => {
@@ -1107,6 +1233,17 @@ export default function App() {
   const [pendingDevolucaoKits, setPendingDevolucaoKits] = useState(() => new Set());
   const [pendingDevolucaoAvulsos, setPendingDevolucaoAvulsos] = useState(() => new Set());
   const [pendingSubstituicoes, setPendingSubstituicoes] = useState(() => new Set());
+  const [pendingOps, setPendingOps] = useState(() => getPendingOps());
+  /**
+   * GPS / Geolocalização
+   */
+  const [geo, setGeo] = useState({
+    ok: false,
+    latitude: 0,
+    longitude: 0,
+    accuracy_m: 0,
+    gps_timestamp: null,
+  });
   const meusKitsId = new Set((meusKits ?? []).map((k) => String(k.id)));
   const meusAvulsosId = new Set((meusAvulsosReais ?? []).map((a) => String(a.id)));
   const meusAvulsosPat = new Set(
@@ -1123,6 +1260,7 @@ export default function App() {
     const patOk = pat ? !meusAvulsosPat.has(pat) : true;
     return idOk && patOk;
   });
+
   const meusListStyle = {
     borderTop: "1px solid rgba(255,255,255,0.08)",
     paddingTop: 12,
@@ -1153,6 +1291,7 @@ export default function App() {
   useEffect(() => {
     setPendingDevolucaoKits((prev) => {
       if (!prev.size) return prev;
+      if (!meusKits?.length) return prev;
       const atual = new Set((meusKits ?? []).map((k) => String(k.id)));
       const next = new Set();
       for (const id of prev) {
@@ -1167,6 +1306,7 @@ export default function App() {
   useEffect(() => {
     setPendingDevolucaoAvulsos((prev) => {
       if (!prev.size) return prev;
+      if (!meusAvulsosReais?.length) return prev;
       const atual = new Set((meusAvulsosReais ?? []).map((a) => String(a.id)));
       const next = new Set();
       for (const id of prev) {
@@ -1177,20 +1317,6 @@ export default function App() {
       return next;
     });
   }, [meusAvulsosReais]);
-
-  useEffect(() => {
-    setPendingSubstituicoes((prev) => {
-      if (!prev.size) return prev;
-      const atual = new Set((meusKits ?? []).map((k) => String(k.id)));
-      const next = new Set();
-      for (const id of prev) {
-        if (atual.has(String(id))) {
-          next.add(String(id));
-        }
-      }
-      return next;
-    });
-  }, [meusKits]);
 
   function toast(msg) {
     setUiMsg(msg);
@@ -1223,6 +1349,119 @@ export default function App() {
       return next;
     });
   };
+
+  const updatePendingOps = useCallback((updater) => {
+    setPendingOps((prev) => {
+      const next = typeof updater === "function" ? updater(prev) : updater;
+      setPendingOpsStorage(next);
+      return next;
+    });
+  }, []);
+
+  const enqueuePendingOp = useCallback(
+    (op) => {
+      if (!op) return;
+      updatePendingOps((prev) => {
+        const key = buildPendingKey(op);
+        if (prev.some((p) => p.key === key)) return prev;
+        const next = [
+          ...prev,
+          {
+            ...op,
+            id: op.id ?? buildPendingId(),
+            key,
+            created_at: nowISO(),
+          },
+        ];
+        return next;
+      });
+    },
+    [updatePendingOps]
+  );
+
+  const pendingRecolherKeys = useMemo(() => {
+    const set = new Set();
+    for (const op of pendingOps) {
+      if (String(op?.type ?? "").toUpperCase() !== "RECOLHER") continue;
+      const key = buildRecolherKey(op?.payload?.kit_id, op?.payload?.patrimonio);
+      if (key) set.add(key);
+    }
+    return set;
+  }, [pendingOps]);
+
+  const refreshPendingOps = useCallback(async () => {
+    if (!authToken) return;
+    try {
+      const list = safeArray(await apiGet("/solicitacoes/operacao/minhas?status=PENDENTE"));
+
+      const nextKits = new Set();
+      const nextAvulsos = new Set();
+      const nextSubst = new Set();
+
+      for (const row of list) {
+        const tipo = String(row?.tipo ?? "").trim().toUpperCase();
+        if (tipo === "DEVOLUCAO_KIT" && row?.kit_id != null) {
+          nextKits.add(String(row.kit_id));
+        } else if (tipo === "DEVOLUCAO_AVULSO" && row?.item_id != null) {
+          nextAvulsos.add(String(row.item_id));
+        } else if (tipo === "SUBSTITUICAO_ITEM" && row?.item_id != null) {
+          nextSubst.add(String(row.item_id));
+        }
+      }
+
+      setPendingDevolucaoKits(nextKits);
+      setPendingDevolucaoAvulsos(nextAvulsos);
+      setPendingSubstituicoes(nextSubst);
+    } catch (e) {
+      console.warn("Falha ao carregar pendencias:", e);
+    }
+  }, [authToken]);
+
+  const processPendingOps = useCallback(async () => {
+    if (!authToken) return;
+    if (!pendingOps.length) return;
+    if (!navigator.onLine) return;
+
+    let next = pendingOps;
+    let processed = false;
+
+    for (const op of pendingOps) {
+      const type = String(op?.type ?? "").toUpperCase();
+      if (type !== "RECOLHER") continue;
+
+      const payload = { ...(op?.payload || {}) };
+      if (payload.lat == null || payload.lng == null) {
+        if (!isGpsValid(geo)) continue;
+        payload.lat = Number(geo.latitude ?? 0);
+        payload.lng = Number(geo.longitude ?? 0);
+      }
+
+      try {
+        await apiRecolher(payload);
+        next = next.filter((p) => p.id !== op.id);
+        processed = true;
+        if (op?.meta?.kit_item_id != null) {
+          setItemSyncPending(op.meta.kit_item_id, false);
+        }
+      } catch (e) {
+        console.warn("pending op error:", e);
+      }
+    }
+
+    if (processed) {
+      updatePendingOps(next);
+      refreshStatusOverview();
+      refreshPendingOps();
+    }
+  }, [
+    authToken,
+    geo,
+    pendingOps,
+    refreshPendingOps,
+    refreshStatusOverview,
+    updatePendingOps,
+  ]);
+
 
   // Admin panel state
   const [adminQuery, setAdminQuery] = useState("");
@@ -1301,23 +1540,15 @@ export default function App() {
     }
   }, [authToken, route]);
 
-  /**
-   * GPS / Geolocalização
-   */
-  const [geo, setGeo] = useState({
-    ok: false,
-    latitude: 0,
-    longitude: 0,
-    accuracy_m: 0,
-    gps_timestamp: null,
-  });
-
   useEffect(() => {
     if (!authToken) {
       setCurrentUser(null);
       setCurrentUserErr("");
       setCurrentUserLoading(false);
       setSelectedEncarregadoId("");
+      setPendingDevolucaoKits(new Set());
+      setPendingDevolucaoAvulsos(new Set());
+      setPendingSubstituicoes(new Set());
       return;
     }
 
@@ -1340,23 +1571,40 @@ export default function App() {
   useEffect(() => {
     if (!authToken) return;
     refreshStatusOverview();
-  }, [authToken, refreshStatusOverview]);
+    refreshPendingOps();
+  }, [authToken, refreshStatusOverview, refreshPendingOps]);
+
+  useEffect(() => {
+    if (!authToken) return;
+    processPendingOps();
+  }, [authToken, processPendingOps]);
 
   useEffect(() => {
     if (!authToken) return;
 
     const t = setInterval(() => {
       refreshStatusOverview();
+      refreshPendingOps();
+      processPendingOps();
     }, 15000);
 
-    const onFocus = () => refreshStatusOverview();
+    const onFocus = () => {
+      refreshStatusOverview();
+      refreshPendingOps();
+      processPendingOps();
+    };
+    const onOnline = () => {
+      processPendingOps();
+    };
     window.addEventListener("focus", onFocus);
+    window.addEventListener("online", onOnline);
 
     return () => {
       clearInterval(t);
       window.removeEventListener("focus", onFocus);
+      window.removeEventListener("online", onOnline);
     };
-  }, [authToken, refreshStatusOverview]);
+  }, [authToken, processPendingOps, refreshStatusOverview, refreshPendingOps]);
 
   useEffect(() => {
     const encId = currentUser?.encarregado_id;
@@ -1391,8 +1639,10 @@ export default function App() {
   }, [apiBase, selectedEncarregadoId]);
 
   useEffect(() => {
-    reloadMeusAvulsos();
-  }, [reloadMeusAvulsos]);
+    reloadMeusAvulsos().finally(() => {
+      refreshPendingOps();
+    });
+  }, [reloadMeusAvulsos, refreshPendingOps]);
 
   const reloadMeusKits = useCallback(() => {
     if (!apiBase || !selectedEncarregadoId) {
@@ -1696,14 +1946,20 @@ export default function App() {
 
         setKitItens(list);
 
-        // inicializa statusMap por kit_item_id
+        // inicializa statusMap por kit_item_id usando status do backend
         const next = {};
         for (const it of list) {
+          const statusItem = String(it?.status_item ?? "").trim().toUpperCase();
+          const isDistrib = statusItem === "DISTRIBUIDO";
+          const lastSubId = it?.ultimo_movimento?.subresponsavel_id ?? null;
+          const syncKey = buildRecolherKey(it?.kit_id, it?.patrimonio);
+          const syncPending = pendingRecolherKeys.has(syncKey);
           next[it.kit_item_id] = {
-            status: "PRESENTE",
+            status: syncPending ? "PRESENTE" : isDistrib ? "DISTRIBUIDO" : "PRESENTE",
             subresponsavel_text: "",
-            subresponsavel_id: null,
-            distribuicao_confirmada: false,
+            subresponsavel_id: lastSubId,
+            distribuicao_confirmada: isDistrib,
+            sync_pending: syncPending,
           };
         }
         setStatusMap(next);
@@ -1714,7 +1970,7 @@ export default function App() {
         setStatusMap({});
       }
     })();
-  }, [selectedKitId]);
+  }, [pendingRecolherKeys, selectedKitId]);
 
   useEffect(() => {
     let alive = true;
@@ -1736,11 +1992,17 @@ export default function App() {
 
         const next = {};
         for (const it of list) {
+          const statusItem = String(it?.status_item ?? "").trim().toUpperCase();
+          const isDistrib = statusItem === "DISTRIBUIDO";
+          const lastSubId = it?.ultimo_movimento?.subresponsavel_id ?? null;
+          const syncKey = buildRecolherKey(it?.kit_id, it?.patrimonio);
+          const syncPending = pendingRecolherKeys.has(syncKey);
           next[it.kit_item_id] = {
-            status: "PRESENTE",
+            status: syncPending ? "PRESENTE" : isDistrib ? "DISTRIBUIDO" : "PRESENTE",
             subresponsavel_text: "",
-            subresponsavel_id: null,
-            distribuicao_confirmada: false,
+            subresponsavel_id: lastSubId,
+            distribuicao_confirmada: isDistrib,
+            sync_pending: syncPending,
           };
         }
         setPosseStatusMap(next);
@@ -1755,7 +2017,7 @@ export default function App() {
     return () => {
       alive = false;
     };
-  }, [posseSelecionada?.data?.id]);
+  }, [pendingRecolherKeys, posseSelecionada?.data?.id]);
 
   /**
    * =========================================================
@@ -1852,6 +2114,7 @@ export default function App() {
     // distribuído precisa de confirmação + id
     for (const ki of kitItens) {
       const st = statusMap[ki.kit_item_id];
+      if (st?.status === "DISTRIBUINDO") return false;
       if (st?.status === "DISTRIBUIDO") {
         if (!st.subresponsavel_id) return false;
         if (!st.distribuicao_confirmada) return false;
@@ -1873,6 +2136,7 @@ export default function App() {
         subresponsavel_text: "",
         subresponsavel_id: null,
         distribuicao_confirmada: false,
+        sync_pending: false,
       };
 
       // Se voltou para PRESENTE, limpa dados de distribuição
@@ -1885,6 +2149,7 @@ export default function App() {
             subresponsavel_text: "",
             subresponsavel_id: null,
             distribuicao_confirmada: false,
+            sync_pending: cur.sync_pending ?? false,
           },
         };
       }
@@ -1896,6 +2161,7 @@ export default function App() {
           [kitItemId]: {
             ...cur,
             status: "DISTRIBUIDO",
+            sync_pending: cur.sync_pending ?? false,
           },
         };
       }
@@ -1909,17 +2175,28 @@ export default function App() {
           subresponsavel_text: "",
           subresponsavel_id: null,
           distribuicao_confirmada: false,
+          sync_pending: cur.sync_pending ?? false,
         },
       };
     });
   }
 
-  /**
-   * =========================================================
-   * Confirm callback (quando distribuir via PIN dá certo)
-   * =========================================================
-   */
-  function markDistribConfirmado(kitItemId) {
+  function setItemStatusBoth(kitItemId, status) {
+    setItemStatus(kitItemId, status);
+    setPosseStatusMap((prev) => {
+      const cur = prev?.[kitItemId];
+      if (!cur) return prev;
+      return {
+        ...prev,
+        [kitItemId]: {
+          ...cur,
+          status,
+        },
+      };
+    });
+  }
+
+  function setItemSyncPending(kitItemId, syncPending) {
     setStatusMap((prev) => {
       const cur = prev[kitItemId];
       if (!cur) return prev;
@@ -1927,7 +2204,21 @@ export default function App() {
         ...prev,
         [kitItemId]: {
           ...cur,
-          distribuicao_confirmada: true,
+          status: syncPending ? "PRESENTE" : cur.status,
+          sync_pending: Boolean(syncPending),
+        },
+      };
+    });
+
+    setPosseStatusMap((prev) => {
+      const cur = prev?.[kitItemId];
+      if (!cur) return prev;
+      return {
+        ...prev,
+        [kitItemId]: {
+          ...cur,
+          status: syncPending ? "PRESENTE" : cur.status,
+          sync_pending: Boolean(syncPending),
         },
       };
     });
@@ -1941,6 +2232,7 @@ export default function App() {
         subresponsavel_text: "",
         subresponsavel_id: null,
         distribuicao_confirmada: false,
+        sync_pending: false,
       };
       return {
         ...prev,
@@ -1961,12 +2253,13 @@ export default function App() {
         subresponsavel_text: "",
         subresponsavel_id: null,
         distribuicao_confirmada: false,
+        sync_pending: false,
       };
       return {
         ...prev,
         [kitItemId]: {
           ...cur,
-          status: "DISTRIBUIDO",
+          status: "DISTRIBUINDO",
         },
       };
     });
@@ -1980,6 +2273,7 @@ export default function App() {
         subresponsavel_text: "",
         subresponsavel_id: null,
         distribuicao_confirmada: false,
+        sync_pending: false,
       };
       return {
         ...prev,
@@ -1990,6 +2284,12 @@ export default function App() {
         },
       };
     });
+  }
+
+  function handleDistribConfirmadoPosse(kitItemId) {
+    markDistribConfirmadoPosse(kitItemId);
+    refreshStatusOverview();
+    refreshPendingOps();
   }
 
   function openManualTermo(item) {
@@ -2177,13 +2477,14 @@ export default function App() {
         subresponsavel_text: "",
         subresponsavel_id: null,
         distribuicao_confirmada: false,
+        sync_pending: false,
       };
 
-      // apenas marcar distribuído pra abrir o picker
+      // apenas marcar distribuindo pra abrir o picker
       if (justMarkDistribuido) {
         return {
           ...prev,
-          [kitItemId]: { ...cur, status: "DISTRIBUIDO" },
+          [kitItemId]: { ...cur, status: "DISTRIBUINDO" },
         };
       }
 
@@ -2194,7 +2495,7 @@ export default function App() {
         ...prev,
         [kitItemId]: {
           ...cur,
-          status: "DISTRIBUIDO",
+          status: "DISTRIBUINDO",
           subresponsavel_text: nome,
           subresponsavel_id: id,
           distribuicao_confirmada: false,
@@ -2208,6 +2509,10 @@ export default function App() {
     toast(`DEVOLUCAO KIT click: ${kitId ?? "sem id"}`);
     if (!kitId) {
       toast("Kit inválido para devolução.");
+      return;
+    }
+    if (pendingDevolucaoKits.has(String(kitId))) {
+      toast("Devolução já solicitada para este kit.");
       return;
     }
     if (!authToken) {
@@ -2229,13 +2534,22 @@ export default function App() {
       });
 
       if (!resp.ok) {
-        const err = await resp.json().catch(() => null);
-        throw new Error(err?.detail ?? err?.message ?? resp.statusText);
+        const txt = await resp.text().catch(() => "");
+        let msg = resp.statusText;
+        try {
+          const j = JSON.parse(txt);
+          msg = j?.detail ?? j?.message ?? msg;
+        } catch {
+          if (txt) msg = txt;
+        }
+        throw new Error(msg);
       }
 
       toast("Solicitação de devolução enviada. Aguarde validação do admin.");
       setPosseSelecionada(null);
       addPendingKit(kitId);
+      refreshPendingOps();
+      refreshStatusOverview();
       await reloadMeusKits();
     } catch (e) {
       toast(e?.message ?? "Não foi possível enviar a devolução.");
@@ -2248,6 +2562,10 @@ export default function App() {
     toast(`DEVOLUCAO AVULSO click: ${itemId ?? "sem id"}`);
     if (!itemId) {
       toast("Avulso inválido para devolução.");
+      return;
+    }
+    if (pendingDevolucaoAvulsos.has(String(itemId))) {
+      toast("Devolução já solicitada para este avulso.");
       return;
     }
     if (!authToken) {
@@ -2276,6 +2594,8 @@ export default function App() {
       toast("Solicitação de devolução enviada. Aguarde validação do admin.");
       setPosseSelecionada(null);
       addPendingAvulso(itemId);
+      refreshPendingOps();
+      refreshStatusOverview();
       await reloadMeusAvulsos();
     } catch (e) {
       toast(e?.message ?? "Não foi possível enviar a devolução.");
@@ -2311,6 +2631,11 @@ export default function App() {
       setSubstSubmitting(false);
       return;
     }
+    if (pendingSubstituicoes.has(String(substItemId))) {
+      toast("Substituição já solicitada para este item.");
+      setSubstSubmitting(false);
+      return;
+    }
     try {
         const resp = await fetch(`${apiBase}/solicitacoes/operacao/`, {
         method: "POST",
@@ -2333,7 +2658,9 @@ export default function App() {
       }
 
       toast("Solicitação de substituição enviada. Admin vai escolher equivalente e validar com PIN.");
-      addPendingSubstituicao(selectedKitId);
+      addPendingSubstituicao(substItemId);
+      refreshPendingOps();
+      refreshStatusOverview();
       setSubstModalItem(null);
     } catch (e) {
       toast("Não consegui registrar no backend (endpoint de substituição ainda não confirmado).");
@@ -2345,7 +2672,21 @@ export default function App() {
 
   // 4) Reagrupar (usuário retoma item distribuído e reintegra no kit)
   async function handleReagruparItem(item) {
-    if (!selectedKitId || !item) return;
+    if (!item) return;
+
+    const kitId = Number(
+      item?.kit_id ?? posseSelecionada?.data?.id ?? selectedKitId ?? 0
+    );
+    if (!kitId) {
+      toast("Kit inválido para reagrupar.");
+      return;
+    }
+
+    const encId = Number(selectedEncarregadoId || currentUser?.encarregado_id || 0);
+    if (!encId) {
+      toast("Encarregado não definido. Selecione o encarregado antes de reagrupar.");
+      return;
+    }
 
     const ok = window.confirm(
       `Confirma a posse do item e a reinserção no kit?\n\n${item.patrimonio} - ${item.descricao}`
@@ -2353,21 +2694,50 @@ export default function App() {
     if (!ok) return;
 
     try {
-      await apiRecolher({
-        kit_id: Number(selectedKitId),
+      const payload = {
+        kit_id: kitId,
         patrimonio: String(item.patrimonio),
-        encarregado_id: Number(selectedEncarregadoId),
-        lat: Number(geo.latitude ?? 0),
-        lng: Number(geo.longitude ?? 0),
+        encarregado_id: encId,
+        lat: isGpsValid(geo) ? Number(geo.latitude ?? 0) : null,
+        lng: isGpsValid(geo) ? Number(geo.longitude ?? 0) : null,
         observacao: "PWA_REAGRUPAR",
-      });
+      };
 
-      setItemStatus(item.kit_item_id, "PRESENTE");
+      if (!navigator.onLine || !isGpsValid(geo)) {
+        enqueuePendingOp({
+          type: "RECOLHER",
+          payload,
+          meta: { kit_item_id: item.kit_item_id ?? null },
+        });
+        setItemStatusBoth(item.kit_item_id, "PRESENTE");
+        setItemSyncPending(item.kit_item_id, true);
+        toast("Reagrupar registrado. Sincronização pendente.");
+        return;
+      }
+
+      await apiRecolher(payload);
+
+      setItemStatusBoth(item.kit_item_id, "PRESENTE");
+      setItemSyncPending(item.kit_item_id, false);
+      refreshStatusOverview();
+      refreshPendingOps();
       toast("Item reagruparado e reinserido no kit.");
     } catch (e) {
-      toast(
-        "Não consegui reagrupar via backend. (Pode depender de validação do admin/PIN no fluxo final.)"
-      );
+      enqueuePendingOp({
+        type: "RECOLHER",
+        payload: {
+          kit_id: kitId,
+          patrimonio: String(item.patrimonio),
+          encarregado_id: encId,
+          lat: isGpsValid(geo) ? Number(geo.latitude ?? 0) : null,
+          lng: isGpsValid(geo) ? Number(geo.longitude ?? 0) : null,
+          observacao: "PWA_REAGRUPAR",
+        },
+        meta: { kit_item_id: item.kit_item_id ?? null },
+      });
+      setItemStatusBoth(item.kit_item_id, "PRESENTE");
+      setItemSyncPending(item.kit_item_id, true);
+      toast("Sem conexão. Reagrupar ficou pendente para sincronizar.");
       console.warn("reagrupar error:", e);
     }
   }
@@ -2399,6 +2769,7 @@ export default function App() {
   const gpsLabel = isGpsValid(geo) ? "GPS ok" : geo.ok ? "GPS inválido" : "GPS indisponível";
 
   const canEletrico = Boolean(currentUser?.encarregado_id);
+  const disableSolicitarTermo = !selectedKitId || isTransit(selectedKitId);
 
   const encarregadoLabel = useMemo(() => {
     const encId = currentUser?.encarregado_id;
@@ -3345,6 +3716,7 @@ export default function App() {
                 style={{
                   flex: 1,
                   minHeight: 0,
+                  maxHeight: 320,
                   overflowY: "auto",
                   scrollbarGutter: "stable",
                   borderTop: "1px solid rgba(255,255,255,0.08)",
@@ -3540,9 +3912,11 @@ export default function App() {
                     onSolicitarSubstituicao={handleSolicitarSubstituicao}
                     onReagrupar={handleReagruparItem}
                     onPickSubresponsavel={handleSubresponsavelPickPosse}
-                    onConfirmDistribuicao={markDistribConfirmadoPosse}
+                    onConfirmDistribuicao={handleDistribConfirmadoPosse}
                     onSolicitarDevolucao={() => solicitarDevolucaoKit(posseSelecionada.data.id)}
                     onDistribuir={markDistribuindoPosse}
+                    pendingDevolucaoKits={pendingDevolucaoKits}
+                    pendingSubstituicoes={pendingSubstituicoes}
                   />
                 ) : (
                   <CardShell title="Detalhes do avulso">
@@ -3555,20 +3929,40 @@ export default function App() {
                       </div>
                         <button
                           type="button"
-                          onClick={() => solicitarDevolucaoAvulso(posseSelecionada.data.id)}
-                        style={{
-                          marginTop: 12,
-                          padding: "8px 12px",
-                          borderRadius: 10,
-                          border: "1px solid #b00020",
-                          background: "#b00020",
-                          color: "#fff",
-                          fontWeight: 900,
-                          cursor: "pointer",
-                        }}
-                      >
-                        Solicitar devolução
-                      </button>
+                          onClick={() =>
+                            solicitarDevolucaoAvulso(
+                              posseSelecionada.data?.item_id ?? posseSelecionada.data?.id
+                            )
+                          }
+                          disabled={pendingDevolucaoAvulsos.has(
+                            String(posseSelecionada.data?.item_id ?? posseSelecionada.data?.id)
+                          )}
+                          style={{
+                            marginTop: 12,
+                            padding: "8px 12px",
+                            borderRadius: 10,
+                            border: "1px solid #b00020",
+                            background: "#b00020",
+                            color: "#fff",
+                            fontWeight: 900,
+                            cursor: pendingDevolucaoAvulsos.has(
+                              String(posseSelecionada.data?.item_id ?? posseSelecionada.data?.id)
+                            )
+                              ? "not-allowed"
+                              : "pointer",
+                            opacity: pendingDevolucaoAvulsos.has(
+                              String(posseSelecionada.data?.item_id ?? posseSelecionada.data?.id)
+                            )
+                              ? 0.6
+                              : 1,
+                          }}
+                        >
+                          {pendingDevolucaoAvulsos.has(
+                            String(posseSelecionada.data?.item_id ?? posseSelecionada.data?.id)
+                          )
+                            ? "Devolução pendente"
+                            : "Solicitar devolução"}
+                        </button>
                     </div>
                   </CardShell>
                 )}
@@ -3636,17 +4030,23 @@ export default function App() {
                 <div style={{ fontSize: 12, opacity: 0.8 }}>{formatKitLabel(previewSelecionado.data)}</div>
                 <button
                   type="button"
-                  onClick={openChecklistTermo}
+                  onClick={() => {
+                    if (disableSolicitarTermo) return;
+                    openChecklistTermo();
+                  }}
+                  disabled={disableSolicitarTermo}
                   style={{
                     alignSelf: "flex-start",
                     padding: "8px 12px",
                     borderRadius: 10,
                     border: "1px solid #111",
-                    background: "#111",
+                    background: disableSolicitarTermo ? "#777" : "#111",
                     color: "#fff",
-                    cursor: "pointer",
+                    cursor: disableSolicitarTermo ? "not-allowed" : "pointer",
                     fontWeight: 700,
+                    opacity: disableSolicitarTermo ? 0.75 : 1,
                   }}
+                  title={disableSolicitarTermo ? "Kit já está em transição (solicitação pendente)." : ""}
                 >
                   Solicitar kit (com termo)
                 </button>

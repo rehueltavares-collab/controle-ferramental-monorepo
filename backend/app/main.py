@@ -11,6 +11,7 @@ from fastapi import FastAPI, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 from sqlalchemy.orm import Session
+from sqlalchemy import bindparam, text
 
 # ✅ IMPORTS CERTOS (sem "backend.app...")
 from .database import SessionLocal, Base, engine
@@ -309,17 +310,64 @@ def listar_itens_kit_detalhados(kit_id: int, db: Session = Depends(get_db)):
         .order_by(models.Item.patrimonio.asc())
     )
 
-    return [
-        {
-            "kit_item_id": r.kit_item_id,
-            "kit_id": r.kit_id,
-            "item_id": r.item_id,
-            "quantidade": r.quantidade,
-            "patrimonio": r.patrimonio,
-            "descricao": r.descricao,
-        }
-        for r in q.all()
-    ]
+    rows = q.all()
+    item_ids = [r.item_id for r in rows]
+
+    last_movs = {}
+    if item_ids:
+        mov_rows = (
+            db.execute(
+                text(
+                    """
+                    SELECT last.item_id, last.acao, last.data_hora, last.subresponsavel_id
+                    FROM item_movimentos last
+                    JOIN (
+                        SELECT item_id, MAX(id) AS max_id
+                        FROM item_movimentos
+                        WHERE item_id IN :item_ids
+                        GROUP BY item_id
+                    ) sub ON sub.item_id = last.item_id AND sub.max_id = last.id
+                    """
+                ).bindparams(bindparam("item_ids", expanding=True)),
+                {"item_ids": item_ids},
+            )
+            .mappings()
+            .all()
+        )
+
+        for m in mov_rows:
+            last_movs[int(m["item_id"])] = {
+                "acao": m["acao"],
+                "data_hora": m["data_hora"],
+                "subresponsavel_id": m["subresponsavel_id"],
+            }
+
+    def _status_from_acao(acao: Optional[str]) -> str:
+        a = (acao or "").strip().upper()
+        if a.startswith("DISTRIBU"):
+            return "DISTRIBUIDO"
+        if a.startswith("RECOLH") or a == "PRESENTE":
+            return "PRESENTE"
+        return "PRESENTE"
+
+    payload = []
+    for r in rows:
+        last = last_movs.get(int(r.item_id))
+        status_item = _status_from_acao(last["acao"] if last else None)
+        payload.append(
+            {
+                "kit_item_id": r.kit_item_id,
+                "kit_id": r.kit_id,
+                "item_id": r.item_id,
+                "quantidade": r.quantidade,
+                "patrimonio": r.patrimonio,
+                "descricao": r.descricao,
+                "status_item": status_item,
+                "ultimo_movimento": last,
+            }
+        )
+
+    return payload
 
 # ======================================================
 # CHECKLIST SEMANAL
