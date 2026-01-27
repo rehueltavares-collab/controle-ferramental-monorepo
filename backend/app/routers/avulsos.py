@@ -18,6 +18,14 @@ def get_db():
         db.close()
 
 
+def ensure_itens_columns(db: Session) -> None:
+    try:
+        db.execute(text("ALTER TABLE itens ADD COLUMN disponivel INT NOT NULL DEFAULT 1"))
+    except Exception:
+        pass
+    db.commit()
+
+
 class AvulsoItemOut(BaseModel):
     id: int
     patrimonio: str
@@ -33,12 +41,14 @@ class RetirarAvulsoIn(BaseModel):
 
 @router.get("", response_model=List[AvulsoItemOut])
 def listar_avulsos(db: Session = Depends(get_db)):
+    ensure_itens_columns(db)
     q = text("""
         SELECT i.id, i.patrimonio, i.descricao
         FROM itens i
         LEFT JOIN kit_itens ki ON ki.item_id = i.id
         WHERE ki.item_id IS NULL
           AND i.ativo = 1
+          AND i.disponivel = 1
         ORDER BY i.descricao, i.patrimonio
     """)
     rows = db.execute(q).mappings().all()
@@ -47,6 +57,7 @@ def listar_avulsos(db: Session = Depends(get_db)):
 
 @router.post("/retirar")
 def retirar_avulso(payload: RetirarAvulsoIn, db: Session = Depends(get_db)):
+    ensure_itens_columns(db)
     q_item = text("""
         SELECT i.id, i.patrimonio, i.descricao
         FROM itens i
@@ -54,6 +65,7 @@ def retirar_avulso(payload: RetirarAvulsoIn, db: Session = Depends(get_db)):
         WHERE i.patrimonio = :patrimonio
           AND i.ativo = 1
           AND ki.item_id IS NULL
+          AND i.disponivel = 1
         LIMIT 1
     """)
     item = db.execute(q_item, {"patrimonio": payload.patrimonio}).mappings().first()
@@ -70,6 +82,10 @@ def retirar_avulso(payload: RetirarAvulsoIn, db: Session = Depends(get_db)):
         "quantidade": payload.quantidade,
         "observacao": payload.observacao or "Retirada avulso para acervo"
     })
+    db.execute(
+        text("UPDATE itens SET disponivel = 0 WHERE id = :id"),
+        {"id": item["id"]},
+    )
     db.commit()
 
     return {

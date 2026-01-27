@@ -91,6 +91,13 @@ button:focus-visible {
   padding-right: 6px;
 }
 
+.admin-queue-scroll{
+  height: 200px;
+  max-height: 200px;
+  overflow-y: auto;
+  scrollbar-gutter: stable;
+}
+
 /* ===== Admin: Trilha (layout estável) ===== */
 .admin-trail-shell{
   margin-top: 14px;

@@ -41,10 +41,20 @@ def require_roles(roles: List[str]):
 
 
 def get_user_row(db: Session, username: str):
+    try:
+        db.execute(text("ALTER TABLE users ADD COLUMN admin_pin_hash TEXT NULL"))
+    except Exception:
+        pass
+    try:
+        db.execute(text("ALTER TABLE users ADD COLUMN precisa_definir_pin INT NOT NULL DEFAULT 1"))
+    except Exception:
+        pass
+    db.commit()
     return db.execute(
         text(
             """
-            SELECT id, username, nome, subresponsavel_id, encarregado_id, role, password_hash, ativo, precisa_definir_senha
+            SELECT id, username, nome, subresponsavel_id, encarregado_id, role, password_hash, ativo,
+                   precisa_definir_senha, admin_pin_hash, precisa_definir_pin
             FROM users
             WHERE username = :u
             LIMIT 1

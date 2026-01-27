@@ -21,6 +21,7 @@ class TokenOut(BaseModel):
     access_token: str
     token_type: str = "bearer"
     must_change_password: bool = False
+    must_set_admin_pin: bool = False
 
 
 @router.post("/login", response_model=TokenOut)
@@ -33,6 +34,7 @@ def login(payload: LoginIn, db: Session = Depends(get_db)):
     if not verify_password(payload.password, user["password_hash"]):
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Credenciais invalidas")
 
+    must_set_admin_pin = bool(user.get("precisa_definir_pin")) if user.get("role") == "admin" else False
     tok = create_token(
         {
             "sub": user["username"],
@@ -41,15 +43,26 @@ def login(payload: LoginIn, db: Session = Depends(get_db)):
             "subresponsavel_id": user["subresponsavel_id"],
             "encarregado_id": user.get("encarregado_id"),
             "must_change_password": bool(user.get("precisa_definir_senha")),
+            "must_set_admin_pin": must_set_admin_pin,
             "nome": user["nome"],
         }
     )
-    return TokenOut(access_token=tok, must_change_password=bool(user.get("precisa_definir_senha")))
+    return TokenOut(
+        access_token=tok,
+        must_change_password=bool(user.get("precisa_definir_senha")),
+        must_set_admin_pin=must_set_admin_pin,
+    )
 
 
 @router.get("/me")
-def me(payload: dict = Depends(get_current_token)):
-    return payload
+def me(payload: dict = Depends(get_current_token), db: Session = Depends(get_db)):
+    user = get_user_row(db, payload.get("sub"))
+    if not user:
+        return payload
+    updated = dict(payload)
+    updated["must_change_password"] = bool(user.get("precisa_definir_senha"))
+    updated["must_set_admin_pin"] = bool(user.get("precisa_definir_pin")) if user.get("role") == "admin" else False
+    return updated
 
 
 class CreateUserIn(BaseModel):
@@ -141,6 +154,7 @@ def definir_senha(
     db.commit()
 
     user = get_user_row(db, payload.get("sub"))
+    must_set_admin_pin = bool(user.get("precisa_definir_pin")) if user.get("role") == "admin" else False
     tok = create_token(
         {
             "sub": user["username"],
@@ -149,7 +163,44 @@ def definir_senha(
             "subresponsavel_id": user["subresponsavel_id"],
             "encarregado_id": user.get("encarregado_id"),
             "must_change_password": False,
+            "must_set_admin_pin": must_set_admin_pin,
             "nome": user["nome"],
         }
     )
-    return TokenOut(access_token=tok, must_change_password=False)
+    return TokenOut(access_token=tok, must_change_password=False, must_set_admin_pin=must_set_admin_pin)
+
+
+class SetAdminPinIn(BaseModel):
+    novo_pin: str
+    confirmar_pin: str
+
+
+@router.post("/admin/set-pin")
+def set_admin_pin(
+    body: SetAdminPinIn,
+    db: Session = Depends(get_db),
+    payload: dict = Depends(get_current_token),
+):
+    if payload.get("role") != "admin":
+        raise HTTPException(status_code=403, detail="Sem permissao")
+
+    pin = (body.novo_pin or "").strip()
+    if pin != (body.confirmar_pin or "").strip():
+        raise HTTPException(status_code=400, detail="PINs nao conferem")
+    if not (pin.isdigit() and len(pin) == 4):
+        raise HTTPException(status_code=400, detail="PIN admin deve ter 4 digitos")
+
+    from ..utils.security import hash_pin
+
+    db.execute(
+        text(
+            """
+            UPDATE users
+            SET admin_pin_hash = :ph, precisa_definir_pin = 0
+            WHERE id = :uid
+            """
+        ),
+        {"ph": hash_pin(pin), "uid": payload["uid"]},
+    )
+    db.commit()
+    return {"ok": True}

@@ -5,6 +5,8 @@ from .termos import router as termos_router
 from .manuais import router as manuais_router
 from .admin import router as admin_router
 from .avulsos import router as avulsos_router
+from .solicitacoes import router as solicitacoes_router
+from .posses import router as posses_router
 
 __all__ = [
     "subresponsaveis_router",
@@ -14,4 +16,6 @@ __all__ = [
     "manuais_router",
     "admin_router",
     "avulsos_router",
+    "solicitacoes_router",
+    "posses_router",
 ]

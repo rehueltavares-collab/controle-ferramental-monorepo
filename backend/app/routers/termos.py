@@ -46,8 +46,11 @@ def criar_termo(
     db: Session = Depends(get_db),
     payload: dict = Depends(get_current_token),
 ):
-    if body.tipo not in ("RETIRADA", "DEVOLUCAO"):
-        raise HTTPException(status_code=400, detail="tipo invalido (RETIRADA/DEVOLUCAO)")
+    if body.tipo not in ("RETIRADA", "DEVOLUCAO", "SUBTERMO_DISTRIBUICAO"):
+        raise HTTPException(
+            status_code=400,
+            detail="tipo invalido (RETIRADA/DEVOLUCAO/SUBTERMO_DISTRIBUICAO)",
+        )
     if body.referencia_tipo not in ("KIT", "ITEM_ELETRICO", "ITEM_MANUAL", "KIT_MANUAL"):
         raise HTTPException(
             status_code=400,
