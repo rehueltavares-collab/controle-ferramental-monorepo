@@ -1,6 +1,8 @@
-from typing import List, Optional
+from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi.encoders import jsonable_encoder
+from fastapi.responses import JSONResponse
 from sqlalchemy.orm import Session
 
 from ..database import get_db
@@ -12,7 +14,7 @@ router = APIRouter(prefix="/solicitacoes/operacao", tags=["SolicitacoesOperacao"
 VALID_TIPOS = {"DEVOLUCAO_KIT", "DEVOLUCAO_AVULSO", "SUBSTITUICAO_ITEM"}
 
 
-@router.get("/minhas", response_model=List[schemas.SolicitacaoOperacaoOut])
+@router.get("/minhas")
 def listar_solicitacoes_minhas(
     status: Optional[str] = Query("PENDENTE"),
     db: Session = Depends(get_db),
@@ -23,7 +25,19 @@ def listar_solicitacoes_minhas(
     )
     if status:
         query = query.filter(models.SolicitacaoOperacao.status == status)
-    return query.order_by(models.SolicitacaoOperacao.criado_em.desc()).all()
+    rows = query.order_by(models.SolicitacaoOperacao.criado_em.desc()).all()
+    items = [
+        {
+            "id": r.id,
+            "tipo": r.tipo,
+            "kit_id": r.kit_id,
+            "item_id": r.item_id,
+            "status": r.status,
+            "criado_em": r.criado_em,
+        }
+        for r in rows
+    ]
+    return JSONResponse(content={"items": jsonable_encoder(items)})
 
 
 @router.post("/", response_model=schemas.SolicitacaoOperacaoOut)

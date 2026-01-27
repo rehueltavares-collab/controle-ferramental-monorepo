@@ -7,15 +7,35 @@ import {
   distribuir as apiDistribuir,
   recolher as apiRecolher,
   criarTermo,
+  solicitarEletrico,
   termosMinha,
   login,
   definirSenha,
+  definirAdminPin,
   listarManuais,
   entregarManual,
   adminBusca,
   adminManualPosse,
   adminTrilhaKit,
   adminTrilhaPatrimonio,
+  adminOperacoesList,
+  adminOperacaoDetalhe,
+  adminOperacaoConcluirEntrega,
+  adminOperacaoConferirEntrega,
+  adminOperacaoAprovarSubstituicao,
+  adminOperacaoConfirmarDevolucao,
+  adminOperacaoConferirDevolucao,
+  adminAvulsosDisponiveis,
+  adminSubstituicaoCandidatos,
+  adminResetSenha,
+  adminAlterarPinSubresponsavel,
+  adminListUsuarios,
+  adminCriarUsuario,
+  adminAtivarUsuario,
+  adminDesativarUsuario,
+  adminCriarSubresponsavel,
+  adminListarPendenciasKits,
+  adminResolverPendenciaKit,
 } from "./services/api";
 
 /**
@@ -36,7 +56,7 @@ function nowISO() {
   return new Date().toISOString();
 }
 
-const LS_TRANSIT = "kitsEmTransicao_v1";
+const LS_TRANSIT = "kitsEmTransicao_v2";
 const LS_PENDING_OPS = "pendingOps_v1";
 
 function getTransitSet() {
@@ -190,6 +210,8 @@ function SubresponsavelPicker({
   const [reuseTermo, setReuseTermo] = useState(null);
   const [reuseChecking, setReuseChecking] = useState(false);
   const [forceNewTermo, setForceNewTermo] = useState(false);
+  const [subtermoOpen, setSubtermoOpen] = useState(false);
+  const [subtermoMsg, setSubtermoMsg] = useState("");
 
   const lastQueryRef = useRef("");
   const debounceRef = useRef(null);
@@ -257,6 +279,22 @@ function SubresponsavelPicker({
       "3) Comunicar imediatamente ocorrencia de extravio, dano, roubo/furto, sinistro ou qualquer irregularidade, permitindo a apuracao interna.",
       "4) Reconheco que, havendo comprovacao de conduta dolosa ou culposa e do nexo com o prejuizo, podera haver responsabilizacao civil e/ou medidas cabiveis, com eventual ressarcimento na forma da lei, observadas as regras trabalhistas aplicaveis e o devido processo de apuracao.",
       "5) Autorizo o registro, para fins de seguranca, auditoria e rastreabilidade, de data/hora, identificacao do usuario, IP, user-agent e, quando disponivel, geolocalizacao, limitado a finalidade de controle patrimonial e prevencao de perdas.",
+      "",
+      `KIT: ${kitRef}`,
+      `ITEM: ${itemRef}`,
+      subRef ? `SUBRESPONSAVEL: ${subRef}` : "",
+      `DATA/HORA: ${new Date().toLocaleString()}`,
+    ].filter(Boolean);
+    return parts.join("\n");
+  }
+
+  function buildSubtermoTexto() {
+    const kitRef = (kitLabel ?? "").trim() || `KIT ${kitId}`;
+    const itemRef = `${patrimonio}${descricao ? ` - ${descricao}` : ""}`;
+    const subRef = (valueText ?? "").trim();
+    const parts = [
+      "SUBTERMO DE DISTRIBUICAO - RECEBIMENTO DE FERRAMENTA",
+      "Declaro o recebimento do item/kit descrito no sistema e assumo a custodia.",
       "",
       `KIT: ${kitRef}`,
       `ITEM: ${itemRef}`,
@@ -350,7 +388,8 @@ function SubresponsavelPicker({
     setTermoMsg("");
     try {
       setTermoOpen(false);
-      await doDistribuir();
+      setSubtermoMsg("");
+      setSubtermoOpen(true);
     } catch (e) {
       const t = e?.message ?? String(e);
       setTermoMsg(t.includes("detail") ? t : t);
@@ -428,13 +467,25 @@ function SubresponsavelPicker({
       setTermoOpen(false);
       setReuseTermo(null);
       setForceNewTermo(false);
-
-      await doDistribuir();
+      setSubtermoMsg("");
+      setSubtermoOpen(true);
     } catch (e) {
       const t = e?.message ?? String(e);
       setTermoMsg(t.includes("detail") ? t : t);
     } finally {
       setTermoSubmitting(false);
+    }
+  }
+
+  async function submitSubtermo() {
+    setSubtermoMsg("");
+    try {
+      setSubtermoOpen(false);
+      await doDistribuir();
+    } catch (e) {
+      const t = e?.message ?? String(e);
+      setSubtermoMsg(t.includes("detail") ? t : t);
+      setSubtermoOpen(true);
     }
   }
 
@@ -676,6 +727,84 @@ function SubresponsavelPicker({
           </div>
         </div>
       ) : null}
+
+      {subtermoOpen ? (
+        <div
+          onClick={() => {
+            if (!confirming) setSubtermoOpen(false);
+          }}
+          style={{
+            position: "fixed",
+            inset: 0,
+            background: "rgba(0,0,0,0.5)",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            zIndex: 99999,
+            padding: 16,
+          }}
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            style={{
+              width: "min(720px, 96vw)",
+              background: "#fff",
+              color: "#111",
+              borderRadius: 12,
+              padding: 16,
+              boxShadow: "0 20px 60px rgba(0,0,0,.35)",
+            }}
+          >
+            <div style={{ fontWeight: 900, fontSize: 16, marginBottom: 8 }}>
+              Subtermo do Subresponsável
+            </div>
+            <div style={{ fontSize: 13, opacity: 0.8, marginBottom: 10 }}>
+              Confirme o recebimento antes de digitar o PIN.
+            </div>
+
+            <label style={{ fontSize: 12, opacity: 0.85 }}>Texto do subtermo</label>
+            <textarea
+              readOnly
+              value={buildSubtermoTexto()}
+              style={{ width: "100%", minHeight: 160, padding: 10, marginTop: 4, fontSize: 12 }}
+            />
+
+            {subtermoMsg ? (
+              <div style={{ marginTop: 8, fontSize: 12, color: "#b00020" }}>{subtermoMsg}</div>
+            ) : null}
+
+            <div style={{ display: "flex", justifyContent: "flex-end", gap: 10, marginTop: 12 }}>
+              <button
+                onClick={() => setSubtermoOpen(false)}
+                disabled={confirming}
+                style={{
+                  padding: "8px 12px",
+                  borderRadius: 8,
+                  border: "1px solid #aaa",
+                  cursor: confirming ? "not-allowed" : "pointer",
+                }}
+              >
+                Cancelar
+              </button>
+              <button
+                onClick={submitSubtermo}
+                disabled={confirming}
+                style={{
+                  padding: "8px 12px",
+                  borderRadius: 8,
+                  border: "1px solid #111",
+                  background: "#111",
+                  color: "#fff",
+                  cursor: confirming ? "not-allowed" : "pointer",
+                  fontWeight: 800,
+                }}
+              >
+                {confirming ? "Confirmando..." : "Confirmar e digitar PIN"}
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 }
@@ -754,19 +883,10 @@ function SolicitacoesCard({
       subtitle="Painel situacional: leitura apenas, sem CTAs."
       right={
         <div style={{ display: "flex", gap: 8, flexWrap: "wrap", justifyContent: "flex-end" }}>
-          <Pill label="Itens" value={statusOverview?.total_items ?? "-"} />
           <Pill label="Presente" value={statusOverview?.present ?? "-"} />
           <Pill label="Distribuído" value={statusOverview?.distributed ?? "-"} />
-          <Pill label="Pendente Itens" value={statusOverview?.pending_items ?? "-"} />
-
-          <Pill label="Pend. Devolução" value={statusOverview?.pending_devolucao ?? "-"} />
           <Pill label="Pend. Substituição" value={statusOverview?.pending_substituicao ?? "-"} />
-          <Pill label="Pend. Termo" value={statusOverview?.pending_termo ?? "-"} />
-
-          {/* Opcional: pendências locais do navegador (não depende do backend) */}
           <Pill label="Transição (local)" value={getTransitSet().size} />
-          {/* Se você implementar fila GPS depois, isso vira Pill de pendingOps */}
-          {/* <Pill label="GPS (local)" value={getPendingGpsOps().length} /> */}
         </div>
       }
     >
@@ -947,6 +1067,11 @@ function DetalhesKitCard({
             const hasPendingSubst =
               itemId != null && pendingSubstituicoes?.has(String(itemId));
             const isSyncPending = Boolean(st.sync_pending);
+            const kitActionId =
+              x.kit_id ?? selectedKitId ?? posseSelecionada?.data?.id ?? null;
+            const hasPendingDev =
+              kitActionId && pendingDevolucaoKits.has(String(kitActionId));
+            const isKitTransit = kitActionId && isTransit(kitActionId);
 
             return (
               <div
@@ -975,19 +1100,29 @@ function DetalhesKitCard({
                       alignItems: "center",
                     }}
                   >
+                    {hasPendingDev || isKitTransit ? (
+                      <div style={{ fontSize: 12, color: "#ffcf33", fontWeight: 700 }}>
+                        {hasPendingDev
+                          ? "Devolução pendente — ações bloqueadas."
+                          : "Kit em transição — ações bloqueadas."}
+                      </div>
+                    ) : null}
                     <button
                       type="button"
                       onClick={() => onSolicitarSubstituicao?.(x)}
-                      disabled={!selectedKitId || hasPendingSubst || isSyncPending}
+                      disabled={
+                        !selectedKitId ||
+                        hasPendingSubst ||
+                        isSyncPending ||
+                        hasPendingDev ||
+                        isKitTransit
+                      }
                       style={{
                         padding: "8px 10px",
                         borderRadius: 10,
                         border: "1px solid #111",
                         background: "#fff",
-                        cursor:
-                          selectedKitId && !hasPendingSubst && !isSyncPending
-                            ? "pointer"
-                            : "not-allowed",
+                        cursor: "pointer",
                         fontWeight: 900,
                       }}
                     >
@@ -1026,7 +1161,9 @@ function DetalhesKitCard({
                           !selectedEncarregadoId ||
                           isSyncPending ||
                           isDistribuindo ||
-                          hasPendingSubst
+                          hasPendingSubst ||
+                          hasPendingDev ||
+                          isKitTransit
                         }
                         style={{
                           padding: "8px 10px",
@@ -1034,14 +1171,7 @@ function DetalhesKitCard({
                           border: "1px solid #111",
                           background: "#111",
                           color: "#fff",
-                          cursor:
-                            !selectedKitId ||
-                            !selectedEncarregadoId ||
-                            isSyncPending ||
-                            isDistribuindo ||
-                            hasPendingSubst
-                              ? "not-allowed"
-                              : "pointer",
+                          cursor: "pointer",
                           fontWeight: 900,
                           opacity: isSyncPending ? 0.7 : 1,
                         }}
@@ -1112,6 +1242,11 @@ export default function App() {
   const [authNotice, setAuthNotice] = useState("");
 
   const [mustChangePassword, setMustChangePassword] = useState(false);
+  const [mustSetAdminPin, setMustSetAdminPin] = useState(false);
+  const [adminPin, setAdminPin] = useState("");
+  const [adminPinConfirm, setAdminPinConfirm] = useState("");
+  const [adminPinErr, setAdminPinErr] = useState("");
+  const [adminPinLoading, setAdminPinLoading] = useState(false);
   const [newPassword, setNewPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
   const [newPassErr, setNewPassErr] = useState("");
@@ -1124,13 +1259,15 @@ export default function App() {
     if (!authToken) return;
     try {
       setStatusOverviewErr("");
-      const j = await apiGet("/status/overview");
+      const encId = currentUser?.encarregado_id;
+      const qs = encId ? `?encarregado_id=${encId}` : "";
+      const j = await apiGet(`/status/overview${qs}`);
       setStatusOverview(j);
     } catch (e) {
       console.warn("Falha ao carregar /status/overview:", e);
       setStatusOverviewErr(e?.message ?? "Falha ao carregar status/overview");
     }
-  }, [authToken]);
+  }, [authToken, currentUser]);
 
 
 
@@ -1145,6 +1282,8 @@ export default function App() {
   const [setores, setSetores] = useState([]);
   const [encarregados, setEncarregados] = useState([]);
   const [kits, setKits] = useState([]);
+  const [kitsDisponiveisApi, setKitsDisponiveisApi] = useState([]);
+  const [kitsPendentes, setKitsPendentes] = useState(new Set());
 
   /**
    * Seleções
@@ -1200,6 +1339,7 @@ export default function App() {
    */
   const [statusMap, setStatusMap] = useState({});
   const [avulsos, setAvulsos] = useState([]); // por enquanto vazio; vai preencher quando inventário real estiver integrado
+  const [avulsosDisponiveisApi, setAvulsosDisponiveisApi] = useState([]);
   const [uiMsg, setUiMsg] = useState("");
 
   const distributedItems = useMemo(() => {
@@ -1228,8 +1368,8 @@ export default function App() {
 
   const meusKits = meusPosseKits ?? [];
   const meusAvulsosReais = meusAvulsos ?? [];
-  const kitsDisponiveis = kits ?? [];
-  const avulsosDisponiveis = avulsos ?? [];
+  const kitsDisponiveis = kitsDisponiveisApi ?? [];
+  const avulsosDisponiveis = avulsosDisponiveisApi ?? [];
   const [pendingDevolucaoKits, setPendingDevolucaoKits] = useState(() => new Set());
   const [pendingDevolucaoAvulsos, setPendingDevolucaoAvulsos] = useState(() => new Set());
   const [pendingSubstituicoes, setPendingSubstituicoes] = useState(() => new Set());
@@ -1251,9 +1391,13 @@ export default function App() {
       .map((a) => String(a.patrimonio ?? "").trim())
       .filter(Boolean)
   );
-  const kitsDisponiveisFiltrados = (kitsDisponiveis ?? []).filter(
-    (k) => !meusKitsId.has(String(k.id)) && !isTransit(k.id)
-  );
+  const kitsDisponiveisFiltrados = (kitsDisponiveis ?? []).filter((k) => {
+    const id = String(k.id);
+    if (meusKitsId.has(id)) return false;
+    if (isTransit(k.id)) return false;
+    if (kitsPendentes.has(id)) return false;
+    return true;
+  });
   const avulsosDisponiveisFiltrados = (avulsosDisponiveis ?? []).filter((a) => {
     const idOk = !meusAvulsosId.has(String(a.id));
     const pat = String(a.patrimonio ?? "").trim();
@@ -1289,6 +1433,18 @@ export default function App() {
   }, [selectedKitId, kits]);
 
   useEffect(() => {
+    if (!selectedKitId) return;
+    const isNowInPosse = meusKitsId.has(String(selectedKitId));
+    if (!isNowInPosse) return;
+    setSelectedKitId("");
+    setPreviewSelecionado((prev) => {
+      if (prev?.tipo !== "kit") return prev;
+      if (String(prev?.data?.id) !== String(selectedKitId)) return prev;
+      return null;
+    });
+  }, [meusKitsId, selectedKitId]);
+
+  useEffect(() => {
     setPendingDevolucaoKits((prev) => {
       if (!prev.size) return prev;
       if (!meusKits?.length) return prev;
@@ -1302,6 +1458,41 @@ export default function App() {
       return next;
     });
   }, [meusKits]);
+
+  useEffect(() => {
+    if (!meusKits?.length) return;
+    // Se o kit já entrou em posse, remove transição local
+    for (const k of meusKits) {
+      removeTransit(k.id);
+    }
+    // Se nada selecionado, pré-seleciona o primeiro kit para mostrar detalhes
+    if (!posseSelecionada && tabMeus === "kits") {
+      setPosseSelecionada({ tipo: "kit", data: meusKits[0] });
+    }
+  }, [meusKits, posseSelecionada, tabMeus]);
+
+  useEffect(() => {
+    if (!posseSelecionada) return;
+    if (posseSelecionada.tipo === "kit") {
+      const id = String(posseSelecionada?.data?.id ?? "");
+      if (!id) return;
+      const stillHas = meusKitsId.has(id);
+      if (!stillHas) {
+        setUiMsg("Posse encerrada. Removendo detalhes...");
+        setPosseSelecionada(null);
+      }
+      return;
+    }
+    if (posseSelecionada.tipo === "avulso") {
+      const id = String(posseSelecionada?.data?.id ?? "");
+      if (!id) return;
+      const stillHas = meusAvulsosId.has(id);
+      if (!stillHas) {
+        setUiMsg("Posse encerrada. Removendo detalhes...");
+        setPosseSelecionada(null);
+      }
+    }
+  }, [meusKitsId, meusAvulsosId, posseSelecionada]);
 
   useEffect(() => {
     setPendingDevolucaoAvulsos((prev) => {
@@ -1392,7 +1583,18 @@ export default function App() {
   const refreshPendingOps = useCallback(async () => {
     if (!authToken) return;
     try {
-      const list = safeArray(await apiGet("/solicitacoes/operacao/minhas?status=PENDENTE"));
+      const pendingRes = await apiGet("/solicitacoes/operacao/minhas?status=PENDENTE");
+      let list = [];
+      if (pendingRes && Array.isArray(pendingRes.items)) {
+        list = pendingRes.items;
+      } else if (Array.isArray(pendingRes)) {
+        list = pendingRes;
+      } else if (pendingRes && Array.isArray(pendingRes.value)) {
+        list = pendingRes.value;
+      } else {
+        // resposta inesperada: não mexe nos sets atuais
+        return;
+      }
 
       const nextKits = new Set();
       const nextAvulsos = new Set();
@@ -1474,6 +1676,58 @@ export default function App() {
   const [adminTermsShowHistory, setAdminTermsShowHistory] = useState(false);
   const [adminLoading, setAdminLoading] = useState(false);
   const [adminErr, setAdminErr] = useState("");
+  const [adminOpenQueues, setAdminOpenQueues] = useState(true);
+  const [adminOpenBusca, setAdminOpenBusca] = useState(false);
+  const [adminOpenCred, setAdminOpenCred] = useState(false);
+  const [adminOpenUsers, setAdminOpenUsers] = useState(false);
+  const [adminOpenTrilha, setAdminOpenTrilha] = useState(false);
+  const [adminQueuesLoading, setAdminQueuesLoading] = useState(false);
+  const [adminQueuesErr, setAdminQueuesErr] = useState("");
+  const [adminQueueSolicitacoes, setAdminQueueSolicitacoes] = useState([]);
+  const [adminQueueSubstituicoes, setAdminQueueSubstituicoes] = useState([]);
+  const [adminQueueDevolucoes, setAdminQueueDevolucoes] = useState([]);
+  const [adminOpDetail, setAdminOpDetail] = useState(null);
+  const [adminOpDetailOpen, setAdminOpDetailOpen] = useState(false);
+  const [adminOpDetailLoading, setAdminOpDetailLoading] = useState(false);
+  const [adminOpActionLoading, setAdminOpActionLoading] = useState(false);
+  const [adminSubstitutoId, setAdminSubstitutoId] = useState("");
+  const [adminSubstitutosDisponiveis, setAdminSubstitutosDisponiveis] = useState([]);
+  const [adminSubstitutosLoading, setAdminSubstitutosLoading] = useState(false);
+  const [adminSubstitutosKits, setAdminSubstitutosKits] = useState([]);
+  const [adminEntregaItens, setAdminEntregaItens] = useState([]);
+  const [adminEntregaPinAdmin, setAdminEntregaPinAdmin] = useState("");
+  const [adminDevolucaoItens, setAdminDevolucaoItens] = useState([]);
+  const [adminDevolucaoPinAdmin, setAdminDevolucaoPinAdmin] = useState("");
+  const [adminTermoOpen, setAdminTermoOpen] = useState(false);
+  const [adminTermoTexto, setAdminTermoTexto] = useState("");
+  const [adminTermoMeta, setAdminTermoMeta] = useState(null);
+  const [adminResetUserId, setAdminResetUserId] = useState("");
+  const [adminResetPin, setAdminResetPin] = useState("");
+  const [adminResetMsg, setAdminResetMsg] = useState("");
+  const [adminSubPinId, setAdminSubPinId] = useState("");
+  const [adminSubPin, setAdminSubPin] = useState("");
+  const [adminSubPinConfirm, setAdminSubPinConfirm] = useState("");
+  const [adminSubPinAdminPin, setAdminSubPinAdminPin] = useState("");
+  const [adminCredLoading, setAdminCredLoading] = useState(false);
+  const [adminUsuariosQuery, setAdminUsuariosQuery] = useState("");
+  const [adminUsuarios, setAdminUsuarios] = useState([]);
+  const [adminUsuariosLoading, setAdminUsuariosLoading] = useState(false);
+  const [adminUsuariosErr, setAdminUsuariosErr] = useState("");
+  const [adminNovoUsuario, setAdminNovoUsuario] = useState({
+    nome_completo: "",
+    username: "",
+    perfil: "ENCARREGADO",
+    subresponsavel_id: "",
+    encarregado_id: "",
+    ativo: true,
+  });
+  const [adminNovoSubresp, setAdminNovoSubresp] = useState({
+    nome: "",
+    secao: "",
+    ativo: true,
+  });
+  const [adminPendenciasKits, setAdminPendenciasKits] = useState([]);
+  const [adminPendenciasLoading, setAdminPendenciasLoading] = useState(false);
 
   const adminTrailChecklists = safeArray(adminTrail?.checklists);
 
@@ -1522,6 +1776,397 @@ export default function App() {
     adminTrailMovements?.[0]?.data_hora ??
     adminTrailMovements?.[0]?.created_at ??
     null;
+  const adminDescricaoCanonica = (adminOpDetail?.contexto?.item_original?.descricao_canonica || "").trim();
+  const adminSubstBloqueada = adminOpDetail?.tipo === "SUBSTITUICAO" && !adminDescricaoCanonica;
+
+  const loadAdminQueues = useCallback(async () => {
+    setAdminQueuesLoading(true);
+    setAdminQueuesErr("");
+    try {
+      const [solRes, subRes, devRes] = await Promise.all([
+        adminOperacoesList({ tipo: "SOLICITACAO", status: "PENDENTE" }),
+        adminOperacoesList({ tipo: "SUBSTITUICAO", status: "PENDENTE" }),
+        adminOperacoesList({ tipo: "DEVOLUCAO", status: "PENDENTE" }),
+      ]);
+      setAdminQueueSolicitacoes(safeArray(solRes?.items));
+      setAdminQueueSubstituicoes(safeArray(subRes?.items));
+      setAdminQueueDevolucoes(safeArray(devRes?.items));
+    } catch (e) {
+      setAdminQueuesErr(e?.message ?? "Falha ao carregar filas do admin.");
+      setAdminQueueSolicitacoes([]);
+      setAdminQueueSubstituicoes([]);
+      setAdminQueueDevolucoes([]);
+    } finally {
+      setAdminQueuesLoading(false);
+    }
+  }, []);
+
+  const openAdminOpDetail = useCallback(async (item) => {
+    if (!item?.id) return;
+    setAdminOpDetailLoading(true);
+    setAdminOpDetail(null);
+    setAdminSubstitutoId("");
+    setAdminSubstitutosDisponiveis([]);
+    setAdminSubstitutosKits([]);
+    setAdminEntregaItens([]);
+    setAdminEntregaPinAdmin("");
+    setAdminDevolucaoItens([]);
+    setAdminDevolucaoPinAdmin("");
+    setAdminOpDetailOpen(true);
+    try {
+      const res = await adminOperacaoDetalhe(item.id, item.origem);
+      setAdminOpDetail(res);
+      if (res?.tipo === "SUBSTITUICAO") {
+        const canon = res?.contexto?.item_original?.descricao_canonica;
+        if (canon) {
+          setAdminSubstitutosLoading(true);
+          try {
+            const listRes = await adminSubstituicaoCandidatos({
+              descricaoCanonica: canon,
+              kitId: res?.contexto?.kit?.id,
+            });
+            setAdminSubstitutosDisponiveis(safeArray(listRes?.avulsos));
+            setAdminSubstitutosKits(safeArray(listRes?.kits));
+          } catch {
+            setAdminSubstitutosDisponiveis([]);
+            setAdminSubstitutosKits([]);
+          } finally {
+            setAdminSubstitutosLoading(false);
+          }
+        }
+      }
+      if (res?.tipo === "SOLICITACAO" && Array.isArray(res?.contexto?.itens)) {
+        const itens = res.contexto.itens.map((it) => ({
+          solicitacao_item_id: it.solicitacao_item_id || it.id,
+          patrimonio: it.patrimonio,
+          descricao: it.descricao,
+          status: "PRESENTE",
+          acao: "PENDENCIA",
+          motivo: "",
+          observacao: "",
+        }));
+        setAdminEntregaItens(itens);
+      }
+      if (res?.tipo === "DEVOLUCAO" && Array.isArray(res?.contexto?.itens)) {
+        const itens = res.contexto.itens.map((it) => ({
+          item_id: it.item_id,
+          patrimonio: it.patrimonio,
+          descricao: it.descricao,
+          status: "PRESENTE",
+          motivo: "",
+          anexo_path: "",
+        }));
+        setAdminDevolucaoItens(itens);
+      }
+    } catch (e) {
+      setAdminOpDetail(null);
+      setAdminQueuesErr(e?.message ?? "Falha ao carregar detalhe da operação.");
+    } finally {
+      setAdminOpDetailLoading(false);
+    }
+  }, []);
+
+  async function concluirEntregaAdmin() {
+    const id = adminOpDetail?.id;
+    if (!id) return;
+    const pin = window.prompt("PIN admin (4 dígitos):");
+    if (pin == null) return;
+    setAdminOpActionLoading(true);
+    try {
+      await adminOperacaoConcluirEntrega(id, String(pin).trim());
+      setAdminOpDetailOpen(false);
+      await loadAdminQueues();
+      await reloadMeusKits();
+      await reloadMeusAvulsos();
+    } catch (e) {
+      toast(e?.message ?? "Falha ao concluir entrega.");
+    } finally {
+      setAdminOpActionLoading(false);
+    }
+  }
+
+  async function confirmarDevolucaoAdmin() {
+    const id = adminOpDetail?.id;
+    if (!id) return;
+    const pin = window.prompt("PIN admin (4 dígitos):");
+    if (pin == null) return;
+    setAdminOpActionLoading(true);
+    try {
+      await adminOperacaoConfirmarDevolucao(id, String(pin).trim());
+      setAdminOpDetailOpen(false);
+      await loadAdminQueues();
+    } catch (e) {
+      toast(e?.message ?? "Falha ao confirmar devolução.");
+    } finally {
+      setAdminOpActionLoading(false);
+    }
+  }
+
+  async function aprovarSubstituicaoAdmin() {
+    const id = adminOpDetail?.id;
+    if (!id) return;
+    const pin = window.prompt("PIN admin (4 dígitos):");
+    if (pin == null) return;
+    const subId = Number(adminSubstitutoId);
+    if (!subId) {
+      toast("Informe o ID do item substituto.");
+      return;
+    }
+    setAdminOpActionLoading(true);
+    try {
+      await adminOperacaoAprovarSubstituicao(id, String(pin).trim(), subId);
+      setAdminOpDetailOpen(false);
+      await loadAdminQueues();
+    } catch (e) {
+      toast(e?.message ?? "Falha ao aprovar substituição.");
+    } finally {
+      setAdminOpActionLoading(false);
+    }
+  }
+
+  function updateAdminEntregaItem(id, patch) {
+    setAdminEntregaItens((prev) =>
+      prev.map((it) => (it.solicitacao_item_id === id ? { ...it, ...patch } : it))
+    );
+  }
+
+  function updateAdminDevolucaoItem(id, patch) {
+    setAdminDevolucaoItens((prev) =>
+      prev.map((it) => (it.item_id === id ? { ...it, ...patch } : it))
+    );
+  }
+
+  async function confirmarEntregaAdmin() {
+    const id = adminOpDetail?.id;
+    if (!id) return;
+    if (!adminEntregaPinAdmin.trim()) {
+      toast("Informe o PIN do admin.");
+      return;
+    }
+    setAdminOpActionLoading(true);
+    try {
+      await adminOperacaoConferirEntrega(id, {
+        admin_pin: adminEntregaPinAdmin.trim(),
+        itens: adminEntregaItens,
+      });
+      setAdminOpDetailOpen(false);
+      await loadAdminQueues();
+      await loadMasters();
+      await reloadMeusKits();
+      await reloadMeusAvulsos();
+    } catch (e) {
+      toast(e?.message ?? "Falha ao concluir entrega.");
+    } finally {
+      setAdminOpActionLoading(false);
+    }
+  }
+
+  async function confirmarDevolucaoDetalhada() {
+    const id = adminOpDetail?.id;
+    if (!id) return;
+    if (!adminDevolucaoPinAdmin.trim()) {
+      toast("Informe o PIN do admin.");
+      return;
+    }
+    setAdminOpActionLoading(true);
+    try {
+      await adminOperacaoConferirDevolucao(id, {
+        admin_pin: adminDevolucaoPinAdmin.trim(),
+        itens: adminDevolucaoItens,
+      });
+      setAdminOpDetailOpen(false);
+      await loadAdminQueues();
+      await loadAdminPendencias();
+      await loadMasters();
+    } catch (e) {
+      toast(e?.message ?? "Falha ao confirmar devolução.");
+    } finally {
+      setAdminOpActionLoading(false);
+    }
+  }
+
+  function openAdminTermo(mov) {
+    const texto = mov?.termo_texto || "";
+    setAdminTermoTexto(texto);
+    setAdminTermoMeta({
+      tipo: mov?.termo_tipo || "—",
+      assinante: mov?.termo_assinatura_nome || "—",
+      criado_em: mov?.termo_criado_em || null,
+    });
+    setAdminTermoOpen(true);
+  }
+
+  async function handleAdminResetSenha() {
+    const userId = Number(adminResetUserId);
+    if (!userId) {
+      toast("Informe o ID do usuário.");
+      return;
+    }
+    const pin = (adminResetPin || "").trim();
+    if (!pin) {
+      toast("Informe o PIN admin.");
+      return;
+    }
+    setAdminCredLoading(true);
+    setAdminResetMsg("");
+    try {
+      await adminResetSenha(userId, pin);
+      setAdminResetMsg("Senha resetada para Perfil@2026.");
+      setAdminResetUserId("");
+      setAdminResetPin("");
+    } catch (e) {
+      setAdminResetMsg(e?.message ?? "Falha ao resetar senha.");
+    } finally {
+      setAdminCredLoading(false);
+    }
+  }
+
+  async function handleAdminAlterarPinSubresp() {
+    const subId = Number(adminSubPinId);
+    if (!subId) {
+      toast("Informe o ID do subresponsável.");
+      return;
+    }
+    const pin = (adminSubPin || "").trim();
+    const pin2 = (adminSubPinConfirm || "").trim();
+    const adminPin = (adminSubPinAdminPin || "").trim();
+    if (!/^\d{6}$/.test(pin)) {
+      toast("Novo PIN deve ter 6 dígitos.");
+      return;
+    }
+    if (pin !== pin2) {
+      toast("PINs não conferem.");
+      return;
+    }
+    if (!adminPin) {
+      toast("Informe o PIN admin.");
+      return;
+    }
+    setAdminCredLoading(true);
+    setAdminResetMsg("");
+    try {
+      await adminAlterarPinSubresponsavel(subId, pin, pin2, adminPin);
+      setAdminResetMsg("PIN do subresponsável atualizado.");
+      setAdminSubPinId("");
+      setAdminSubPin("");
+      setAdminSubPinConfirm("");
+      setAdminSubPinAdminPin("");
+    } catch (e) {
+      setAdminResetMsg(e?.message ?? "Falha ao alterar PIN do subresponsável.");
+    } finally {
+      setAdminCredLoading(false);
+    }
+  }
+
+  const loadAdminUsuarios = useCallback(async () => {
+    setAdminUsuariosLoading(true);
+    setAdminUsuariosErr("");
+    try {
+      const res = await adminListUsuarios(adminUsuariosQuery);
+      setAdminUsuarios(safeArray(res?.items));
+    } catch (e) {
+      setAdminUsuariosErr(e?.message ?? "Falha ao carregar usuários.");
+      setAdminUsuarios([]);
+    } finally {
+      setAdminUsuariosLoading(false);
+    }
+  }, [adminUsuariosQuery]);
+
+  async function handleCriarUsuarioAdmin() {
+    const payload = {
+      ...adminNovoUsuario,
+      subresponsavel_id: adminNovoUsuario.subresponsavel_id
+        ? Number(adminNovoUsuario.subresponsavel_id)
+        : null,
+      encarregado_id: adminNovoUsuario.encarregado_id ? Number(adminNovoUsuario.encarregado_id) : null,
+    };
+    if (!payload.nome_completo || !payload.username) {
+      toast("Informe nome e username.");
+      return;
+    }
+    setAdminUsuariosLoading(true);
+    setAdminUsuariosErr("");
+    try {
+      await adminCriarUsuario(payload);
+      setAdminNovoUsuario({
+        nome_completo: "",
+        username: "",
+        perfil: "ENCARREGADO",
+        subresponsavel_id: "",
+        encarregado_id: "",
+        ativo: true,
+      });
+      await loadAdminUsuarios();
+    } catch (e) {
+      setAdminUsuariosErr(e?.message ?? "Falha ao criar usuário.");
+    } finally {
+      setAdminUsuariosLoading(false);
+    }
+  }
+
+  async function handleToggleUsuarioAtivo(user) {
+    if (!user?.id) return;
+    setAdminUsuariosLoading(true);
+    try {
+      if (Number(user.ativo) === 1) {
+        await adminDesativarUsuario(user.id);
+      } else {
+        await adminAtivarUsuario(user.id);
+      }
+      await loadAdminUsuarios();
+    } catch (e) {
+      setAdminUsuariosErr(e?.message ?? "Falha ao atualizar usuário.");
+    } finally {
+      setAdminUsuariosLoading(false);
+    }
+  }
+
+  async function handleCriarSubresponsavelAdmin() {
+    const payload = {
+      ...adminNovoSubresp,
+      ativo: Boolean(adminNovoSubresp.ativo),
+    };
+    if (!payload.nome) {
+      toast("Informe o nome do subresponsável.");
+      return;
+    }
+    setAdminUsuariosLoading(true);
+    setAdminUsuariosErr("");
+    try {
+      await adminCriarSubresponsavel(payload);
+      setAdminNovoSubresp({ nome: "", secao: "", ativo: true });
+    } catch (e) {
+      setAdminUsuariosErr(e?.message ?? "Falha ao criar subresponsável.");
+    } finally {
+      setAdminUsuariosLoading(false);
+    }
+  }
+
+  const loadAdminPendencias = useCallback(async () => {
+    setAdminPendenciasLoading(true);
+    try {
+      const res = await adminListarPendenciasKits();
+      setAdminPendenciasKits(safeArray(res?.items));
+    } catch (e) {
+      setAdminPendenciasKits([]);
+    } finally {
+      setAdminPendenciasLoading(false);
+    }
+  }, []);
+
+  async function resolverPendenciaKit(pendenciaId) {
+    if (!pendenciaId) return;
+    setAdminPendenciasLoading(true);
+    try {
+      await adminResolverPendenciaKit(pendenciaId);
+      await loadAdminPendencias();
+      await loadMasters();
+    } catch (e) {
+      toast(e?.message ?? "Falha ao resolver pendência.");
+    } finally {
+      setAdminPendenciasLoading(false);
+    }
+  }
 
   useEffect(() => {
     const onPop = () => {
@@ -1558,6 +2203,7 @@ export default function App() {
       .then((res) => {
         setCurrentUser(res);
         setMustChangePassword(Boolean(res?.must_change_password));
+        setMustSetAdminPin(Boolean(res?.must_set_admin_pin));
       })
       .catch((e) => {
         setCurrentUserErr(e?.message ?? "Falha ao carregar perfil.");
@@ -1580,33 +2226,6 @@ export default function App() {
   }, [authToken, processPendingOps]);
 
   useEffect(() => {
-    if (!authToken) return;
-
-    const t = setInterval(() => {
-      refreshStatusOverview();
-      refreshPendingOps();
-      processPendingOps();
-    }, 15000);
-
-    const onFocus = () => {
-      refreshStatusOverview();
-      refreshPendingOps();
-      processPendingOps();
-    };
-    const onOnline = () => {
-      processPendingOps();
-    };
-    window.addEventListener("focus", onFocus);
-    window.addEventListener("online", onOnline);
-
-    return () => {
-      clearInterval(t);
-      window.removeEventListener("focus", onFocus);
-      window.removeEventListener("online", onOnline);
-    };
-  }, [authToken, processPendingOps, refreshStatusOverview, refreshPendingOps]);
-
-  useEffect(() => {
     const encId = currentUser?.encarregado_id;
     if (encId) {
       setSelectedEncarregadoId(String(encId));
@@ -1616,13 +2235,9 @@ export default function App() {
   }, [currentUser]);
 
   useEffect(() => {
-    if (!apiBase) return;
-
-    fetch(`${apiBase}/avulsos`)
-      .then((r) => (r.ok ? r.json() : Promise.reject()))
-      .then(setAvulsos)
-      .catch(() => setAvulsos([]));
-  }, [apiBase]);
+    if (!currentUser) return;
+    refreshStatusOverview();
+  }, [currentUser, refreshStatusOverview]);
 
   const reloadMeusAvulsos = useCallback(() => {
     if (!apiBase || !selectedEncarregadoId) {
@@ -1645,22 +2260,97 @@ export default function App() {
   }, [reloadMeusAvulsos, refreshPendingOps]);
 
   const reloadMeusKits = useCallback(() => {
-    if (!apiBase || !selectedEncarregadoId) {
+    const encId = selectedEncarregadoId || currentUser?.encarregado_id;
+    if (!apiBase || !encId) {
       setMeusPosseKits([]);
       return Promise.resolve();
     }
 
-    return fetch(`${apiBase}/posses/kits/minha?encarregado_id=${selectedEncarregadoId}`)
+    return fetch(`${apiBase}/posses/kits/minha?encarregado_id=${encId}`)
       .then((r) => (r.ok ? r.json() : Promise.reject()))
       .then(setMeusPosseKits)
       .catch(() => {
         setMeusPosseKits([]);
       });
-  }, [apiBase, selectedEncarregadoId]);
+  }, [apiBase, selectedEncarregadoId, currentUser]);
+
+  const reloadDisponiveis = useCallback(() => {
+    if (!apiBase) {
+      setKitsDisponiveisApi([]);
+      setAvulsosDisponiveisApi([]);
+      return Promise.resolve();
+    }
+
+    return Promise.all([
+      fetch(`${apiBase}/posses/kits/disponiveis`)
+        .then((r) => (r.ok ? r.json() : Promise.reject()))
+        .then((res) => setKitsDisponiveisApi(safeArray(res)))
+        .catch(() => setKitsDisponiveisApi([])),
+      fetch(`${apiBase}/posses/avulsos/disponiveis`)
+        .then((r) => (r.ok ? r.json() : Promise.reject()))
+        .then((res) => {
+          const list = safeArray(res);
+          setAvulsos(list);
+          setAvulsosDisponiveisApi(list);
+        })
+        .catch(() => {
+          setAvulsos([]);
+          setAvulsosDisponiveisApi([]);
+        }),
+    ]);
+  }, [apiBase]);
 
   useEffect(() => {
     reloadMeusKits();
   }, [reloadMeusKits]);
+
+  useEffect(() => {
+    reloadDisponiveis();
+  }, [reloadDisponiveis]);
+
+  useEffect(() => {
+    if (!authToken) return;
+
+    const t = setInterval(() => {
+      refreshStatusOverview();
+      refreshPendingOps();
+      processPendingOps();
+      reloadMeusKits();
+      reloadMeusAvulsos();
+      reloadDisponiveis();
+    }, 15000);
+
+    const onFocus = () => {
+      refreshStatusOverview();
+      refreshPendingOps();
+      processPendingOps();
+      reloadMeusKits();
+      reloadMeusAvulsos();
+      reloadDisponiveis();
+    };
+    const onOnline = () => {
+      processPendingOps();
+      reloadMeusKits();
+      reloadMeusAvulsos();
+      reloadDisponiveis();
+    };
+    window.addEventListener("focus", onFocus);
+    window.addEventListener("online", onOnline);
+
+    return () => {
+      clearInterval(t);
+      window.removeEventListener("focus", onFocus);
+      window.removeEventListener("online", onOnline);
+    };
+  }, [
+    authToken,
+    processPendingOps,
+    refreshStatusOverview,
+    refreshPendingOps,
+    reloadMeusKits,
+    reloadMeusAvulsos,
+    reloadDisponiveis,
+  ]);
 
   useEffect(() => {
     const hasEletrico = Boolean(currentUser?.encarregado_id);
@@ -1685,15 +2375,20 @@ export default function App() {
     setErr("");
 
     try {
-      const [setoresRes, encRes, kitsRes] = await Promise.all([
+      const [setoresRes, encRes, kitsRes, kitsDisponiveisRes, kitsPendRes] = await Promise.all([
         withRetry(() => apiGet("/setores/"), 2, 300),
         withRetry(() => apiGet("/encarregados/"), 2, 300),
         withRetry(() => apiGet("/kits/"), 2, 300),
+        withRetry(() => apiGet("/posses/kits/disponiveis"), 2, 300),
+        withRetry(() => apiGet("/kits/pendencias"), 2, 300),
       ]);
 
       setSetores(safeArray(setoresRes));
       setEncarregados(safeArray(encRes));
       setKits(safeArray(kitsRes));
+      setKitsDisponiveisApi(safeArray(kitsDisponiveisRes));
+      const pend = safeArray(kitsPendRes?.kits);
+      setKitsPendentes(new Set(pend.map((id) => String(id))));
     } catch (e) {
       console.error("loadMasters error:", e);
       setErr(e?.message ?? "Falha ao buscar (rede instável). Tente recarregar.");
@@ -1708,6 +2403,8 @@ export default function App() {
     setAdminErr("");
     setAdminTrail(null);
     setAdminTrailTitle("");
+    setAdminOpenBusca(true);
+    setAdminOpenTrilha(true);
     try {
       const res = await adminBusca({
         query: adminQuery.trim(),
@@ -1732,6 +2429,7 @@ export default function App() {
   async function openTrailKit(kit) {
     setAdminLoading(true);
     setAdminErr("");
+    setAdminOpenTrilha(true);
     try {
       const res = await adminTrilhaKit(kit.id);
       setAdminTrail(res);
@@ -1748,6 +2446,7 @@ export default function App() {
   async function openTrailPatrimonio(item) {
     setAdminLoading(true);
     setAdminErr("");
+    setAdminOpenTrilha(true);
     try {
       const res = await adminTrilhaPatrimonio(item.patrimonio);
       setAdminTrail(res);
@@ -1778,6 +2477,7 @@ export default function App() {
       const res = await login(user, pass);
       const tok = res?.access_token;
       const mustChange = Boolean(res?.must_change_password);
+      const mustSetPin = Boolean(res?.must_set_admin_pin);
       if (!tok) {
         setAuthErr("Token nao retornado pelo login.");
         return;
@@ -1785,8 +2485,11 @@ export default function App() {
       localStorage.setItem("access_token", tok);
       setAuthToken(tok);
       setMustChangePassword(mustChange);
+      setMustSetAdminPin(mustSetPin);
       if (mustChange) {
         setAuthNotice("Senha temporaria detectada. Defina sua senha para continuar.");
+      } else if (mustSetPin) {
+        setAuthNotice("Admin sem PIN. Defina o PIN para continuar.");
       }
       setAuthPass("");
       goTo("/app");
@@ -1815,6 +2518,7 @@ export default function App() {
     setAuthPass("");
     setAuthErr("");
     setAuthNotice("");
+    setMustSetAdminPin(false);
     goTo("/login");
   }
 
@@ -2181,6 +2885,34 @@ export default function App() {
     });
   }
 
+  async function submitAdminPin() {
+    setAdminPinErr("");
+    const pin = (adminPin || "").trim();
+    const pin2 = (adminPinConfirm || "").trim();
+
+    if (!/^\d{4}$/.test(pin)) {
+      setAdminPinErr("PIN deve ter 4 dígitos numéricos.");
+      return;
+    }
+    if (pin !== pin2) {
+      setAdminPinErr("PIN e confirmação não conferem.");
+      return;
+    }
+
+    setAdminPinLoading(true);
+    try {
+      await definirAdminPin(pin, pin2);
+      setMustSetAdminPin(false);
+      setAdminPin("");
+      setAdminPinConfirm("");
+      toast("PIN admin definido.");
+    } catch (e) {
+      setAdminPinErr(e?.message ?? "Falha ao definir PIN admin.");
+    } finally {
+      setAdminPinLoading(false);
+    }
+  }
+
   function setItemStatusBoth(kitItemId, status) {
     setItemStatus(kitItemId, status);
     setPosseStatusMap((prev) => {
@@ -2380,13 +3112,6 @@ export default function App() {
       return;
     }
 
-    if (isTransit(selectedKitId)) {
-      setChecklistTermoMsg("Esse kit já está em transição (solicitação pendente).");
-      return;
-    }
-
-    addTransit(selectedKitId);
-
     setChecklistTermoSubmitting(true);
     setChecklistTermoMsg("");
     try {
@@ -2400,7 +3125,7 @@ export default function App() {
         longitude: isGpsValid(geo) ? Number(geo.longitude ?? 0) : null,
       };
 
-      await criarTermo(termoPayload);
+      const termoRes = await criarTermo(termoPayload);
 
       try {
         await submitChecklist();
@@ -2409,10 +3134,18 @@ export default function App() {
         setChecklistTermoMsg("Termo criado, mas falha no checklist semanal. Tente reenviar.");
       }
 
+      try {
+        await solicitarEletrico({ kit_id: Number(selectedKitId), termo_id: Number(termoRes?.id) });
+      } catch (e3) {
+        console.warn("Solicitacao eletrica falhou após termo:", e3);
+        setChecklistTermoMsg("Termo criado, mas falha ao registrar solicitação elétrica.");
+        return;
+      }
+
+      addTransit(selectedKitId);
       setChecklistTermoOpen(false);
       setChecklistTermoMsg("Solicitação enviada. Kit em transição.");
     } catch (e) {
-      removeTransit(selectedKitId);
       setChecklistTermoMsg(e?.message ?? "Falha ao salvar termo do checklist.");
     } finally {
       setChecklistTermoSubmitting(false);
@@ -2520,6 +3253,7 @@ export default function App() {
       return;
     }
 
+    addTransit(kitId);
     try {
       const resp = await fetch(`${apiBase}/solicitacoes/operacao/`, {
         method: "POST",
@@ -2552,6 +3286,7 @@ export default function App() {
       refreshStatusOverview();
       await reloadMeusKits();
     } catch (e) {
+      removeTransit(kitId);
       toast(e?.message ?? "Não foi possível enviar a devolução.");
       console.error("solicitarDevolucaoKit error:", e);
     }
@@ -2754,6 +3489,21 @@ export default function App() {
   const isOperador = role === "manutencao";
   const hasProfile = Boolean(currentUser);
   const isUsuario = hasProfile && !isAdmin && !isOperador;
+
+  useEffect(() => {
+    if (!authToken || !isAdmin) return;
+    loadAdminQueues();
+  }, [authToken, isAdmin, loadAdminQueues]);
+
+  useEffect(() => {
+    if (!authToken || !isAdmin) return;
+    loadAdminUsuarios();
+  }, [authToken, isAdmin, loadAdminUsuarios]);
+
+  useEffect(() => {
+    if (!authToken || !isAdmin) return;
+    loadAdminPendencias();
+  }, [authToken, isAdmin, loadAdminPendencias]);
 
   const roleCopy = !hasProfile
     ? ""
@@ -3045,6 +3795,73 @@ export default function App() {
         </div>
       ) : null}
 
+      {mustSetAdminPin ? (
+        <div
+          style={{
+            position: "fixed",
+            inset: 0,
+            background: "rgba(0,0,0,0.5)",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            zIndex: 99999,
+            padding: 16,
+          }}
+        >
+          <div
+            style={{
+              width: "min(520px, 94vw)",
+              background: "#fff",
+              color: "#111",
+              borderRadius: 12,
+              padding: 16,
+              boxShadow: "0 20px 60px rgba(0,0,0,.35)",
+            }}
+          >
+            <div style={{ fontWeight: 900, fontSize: 16, marginBottom: 8 }}>Definir PIN admin</div>
+            <div style={{ fontSize: 12, opacity: 0.8, marginBottom: 10 }}>
+              Primeiro acesso: crie seu PIN de 4 dígitos.
+            </div>
+
+            <label style={{ fontSize: 12, opacity: 0.85 }}>Novo PIN</label>
+            <input
+              style={{ width: "100%", padding: 10, marginTop: 4, marginBottom: 8 }}
+              type="password"
+              value={adminPin}
+              onChange={(e) => setAdminPin(e.target.value)}
+            />
+
+            <label style={{ fontSize: 12, opacity: 0.85 }}>Confirmar PIN</label>
+            <input
+              style={{ width: "100%", padding: 10, marginTop: 4, marginBottom: 8 }}
+              type="password"
+              value={adminPinConfirm}
+              onChange={(e) => setAdminPinConfirm(e.target.value)}
+            />
+
+            {adminPinErr ? <div style={{ color: "#b00020", fontSize: 12 }}>{adminPinErr}</div> : null}
+
+            <div style={{ display: "flex", justifyContent: "flex-end", gap: 10, marginTop: 12 }}>
+              <button
+                onClick={submitAdminPin}
+                disabled={adminPinLoading}
+                style={{
+                  padding: "8px 12px",
+                  borderRadius: 8,
+                  border: "1px solid #111",
+                  background: "#111",
+                  color: "#fff",
+                  cursor: adminPinLoading ? "not-allowed" : "pointer",
+                  fontWeight: 800,
+                }}
+              >
+                {adminPinLoading ? "Salvando..." : "Salvar PIN"}
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
             {isAdmin && (
         <div style={{ marginBottom: 18 }}>
           <div
@@ -3056,262 +3873,1148 @@ export default function App() {
               marginBottom: 12,
             }}
           >
-            <div style={{ fontWeight: 800, marginBottom: 8 }}>Painel Admin - Busca Global</div>
-
-            <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "center" }}>
-              <input
-                style={{ flex: 1, minWidth: 220, padding: 10 }}
-                placeholder="Buscar por kit, patrimonio ou nome"
-                value={adminQuery}
-                onChange={(e) => setAdminQuery(e.target.value)}
-              />
-
-              <select
-                style={{ padding: 10, minWidth: 180 }}
-                value={adminSetorId}
-                onChange={(e) => setAdminSetorId(e.target.value)}
-              >
-                <option value="">Todas as obras/setores</option>
-                {setores.map((s) => (
-                  <option key={s.id} value={s.id}>
-                    {s.nome}
-                  </option>
-                ))}
-              </select>
-
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
+              <div style={{ fontWeight: 800 }}>Painel Admin - Filas Operacionais</div>
               <button
-                onClick={runAdminBusca}
-                disabled={adminLoading}
+                onClick={loadAdminQueues}
+                disabled={adminQueuesLoading}
                 style={{
-                  padding: "10px 12px",
+                  padding: "6px 10px",
                   border: "1px solid #111",
-                  borderRadius: 10,
+                  borderRadius: 8,
                   background: "#111",
                   color: "#fff",
-                  cursor: adminLoading ? "not-allowed" : "pointer",
+                  cursor: adminQueuesLoading ? "not-allowed" : "pointer",
                   fontWeight: 800,
                 }}
               >
-                {adminLoading ? "Buscando..." : "Buscar"}
+                {adminQueuesLoading ? "Carregando..." : "Recarregar filas"}
               </button>
             </div>
+
+            {adminQueuesErr ? (
+              <div style={{ marginTop: 8, fontSize: 12, color: "#b00020" }}>{adminQueuesErr}</div>
+            ) : null}
+
+            <div className="admin-results-grid" style={{ marginTop: 12 }}>
+              <div className="admin-panel-card">
+                <h3>Solicitações pendentes</h3>
+                <div className="admin-list-scroll admin-queue-scroll">
+                  {adminQueueSolicitacoes.length === 0 ? (
+                    <div style={{ fontSize: 12, opacity: 0.7 }}>Sem pendências.</div>
+                  ) : (
+                    adminQueueSolicitacoes.map((op) => (
+                      <div
+                        key={`${op.origem || "sol"}-${op.id}`}
+                        style={{ display: "flex", justifyContent: "space-between", gap: 8, padding: "4px 0" }}
+                      >
+                        <div>
+                          <div style={{ fontWeight: 700 }}>
+                            {op.kit?.nome || `Kit #${op.kit?.id || "-"}`}
+                          </div>
+                          <div style={{ fontSize: 12, opacity: 0.7 }}>
+                            {op.solicitante?.nome || "—"} • {op.categoria || "KIT"}
+                          </div>
+                        </div>
+                        <button
+                          onClick={() => openAdminOpDetail(op)}
+                          style={{ padding: "2px 6px", border: "1px solid #111", borderRadius: 6, cursor: "pointer" }}
+                        >
+                          Detalhe
+                        </button>
+                      </div>
+                    ))
+                  )}
+                </div>
+              </div>
+
+              <div className="admin-panel-card">
+                <h3>Substituições pendentes</h3>
+                <div className="admin-list-scroll admin-queue-scroll">
+                  {adminQueueSubstituicoes.length === 0 ? (
+                    <div style={{ fontSize: 12, opacity: 0.7 }}>Sem pendências.</div>
+                  ) : (
+                    adminQueueSubstituicoes.map((op) => (
+                      <div
+                        key={`${op.origem || "sub"}-${op.id}`}
+                        style={{ display: "flex", justifyContent: "space-between", gap: 8, padding: "4px 0" }}
+                      >
+                        <div>
+                          <div style={{ fontWeight: 700 }}>
+                            {op.item?.patrimonio || op.kit?.nome || `#${op.id}`}
+                          </div>
+                          <div style={{ fontSize: 12, opacity: 0.7 }}>
+                            {op.solicitante?.nome || "—"} • {op.categoria || "KIT"}
+                          </div>
+                        </div>
+                        <button
+                          onClick={() => openAdminOpDetail(op)}
+                          style={{ padding: "2px 6px", border: "1px solid #111", borderRadius: 6, cursor: "pointer" }}
+                        >
+                          Detalhe
+                        </button>
+                      </div>
+                    ))
+                  )}
+                </div>
+              </div>
+
+              <div className="admin-panel-card">
+                <h3>Devoluções pendentes</h3>
+                <div className="admin-list-scroll admin-queue-scroll">
+                  {adminQueueDevolucoes.length === 0 ? (
+                    <div style={{ fontSize: 12, opacity: 0.7 }}>Sem pendências.</div>
+                  ) : (
+                    adminQueueDevolucoes.map((op) => (
+                      <div
+                        key={`${op.origem || "dev"}-${op.id}`}
+                        style={{ display: "flex", justifyContent: "space-between", gap: 8, padding: "4px 0" }}
+                      >
+                        <div>
+                          <div style={{ fontWeight: 700 }}>
+                            {op.item?.patrimonio || op.kit?.nome || `#${op.id}`}
+                          </div>
+                          <div style={{ fontSize: 12, opacity: 0.7 }}>
+                            {op.solicitante?.nome || "—"} • {op.categoria || "KIT"}
+                          </div>
+                        </div>
+                        <button
+                          onClick={() => openAdminOpDetail(op)}
+                          style={{ padding: "2px 6px", border: "1px solid #111", borderRadius: 6, cursor: "pointer" }}
+                        >
+                          Detalhe
+                        </button>
+                      </div>
+                    ))
+                  )}
+                </div>
+              </div>
+            </div>
           </div>
 
-          {adminErr ? (
-            <div style={{ background: "#ffe8e8", border: "1px solid #ffb3b3", padding: 10, marginBottom: 12 }}>
-              <b>Erro:</b> {adminErr}
+          <div
+            style={{
+              border: "1px solid #ddd",
+              borderRadius: 12,
+              padding: 12,
+              background: "#fafafa",
+              marginBottom: 12,
+            }}
+          >
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
+              <div style={{ fontWeight: 800 }}>Kits com pendência</div>
+              <button
+                onClick={loadAdminPendencias}
+                disabled={adminPendenciasLoading}
+                style={{
+                  padding: "6px 10px",
+                  border: "1px solid #111",
+                  borderRadius: 8,
+                  background: "#111",
+                  color: "#fff",
+                  cursor: adminPendenciasLoading ? "not-allowed" : "pointer",
+                  fontWeight: 800,
+                }}
+              >
+                {adminPendenciasLoading ? "Carregando..." : "Recarregar"}
+              </button>
             </div>
-          ) : null}
-
-          <div className="admin-results-grid">
-            <div className="admin-panel-card">
-              <h3>Kits</h3>
-              <div className="admin-list-scroll">
-                {adminKits.length === 0 ? (
-                  <div style={{ fontSize: 12, opacity: 0.7 }}>Sem resultados.</div>
-                ) : (
-                  adminKits.map((k) => (
-                    <div key={k.id} style={{ display: "flex", justifyContent: "space-between", gap: 8, padding: "4px 0" }}>
-                      <div>#{k.id} {k.nome}</div>
-                      <button
-                        onClick={() => openTrailKit(k)}
-                        style={{ padding: "2px 6px", border: "1px solid #111", borderRadius: 6, cursor: "pointer" }}
-                      >
-                        Trilha
-                      </button>
+            <div className="admin-list-scroll" style={{ marginTop: 8 }}>
+              {adminPendenciasKits.length === 0 ? (
+                <div style={{ fontSize: 12, opacity: 0.7 }}>Sem pendências.</div>
+              ) : (
+                adminPendenciasKits.map((p) => (
+                  <div
+                    key={p.id}
+                    style={{ display: "flex", justifyContent: "space-between", gap: 8, padding: "4px 0" }}
+                  >
+                    <div style={{ fontSize: 12 }}>
+                      <div style={{ fontWeight: 700 }}>{p.kit_nome || `Kit #${p.kit_id}`}</div>
+                      <div style={{ opacity: 0.7 }}>
+                        {p.descricao_canonica || "-"} • {p.motivo || "PENDENCIA"}
+                      </div>
                     </div>
-                  ))
-                )}
-              </div>
-            </div>
-
-            <div className="admin-panel-card">
-              <h3>Itens (patrimônio)</h3>
-              <div className="admin-list-scroll">
-                {adminItens.length === 0 ? (
-                  <div style={{ fontSize: 12, opacity: 0.7 }}>Sem resultados.</div>
-                ) : (
-                  adminItens.map((it) => (
-                    <div key={it.id} style={{ display: "flex", justifyContent: "space-between", gap: 8, padding: "4px 0" }}>
-                      <div>{it.patrimonio}</div>
-                      <button
-                        onClick={() => openTrailPatrimonio(it)}
-                        style={{ padding: "2px 6px", border: "1px solid #111", borderRadius: 6, cursor: "pointer" }}
-                      >
-                        Trilha
-                      </button>
-                    </div>
-                  ))
-                )}
-              </div>
-            </div>
-
-            <div className="admin-panel-card">
-              <h3>Posse manual (atual)</h3>
-              <div className="admin-list-scroll">
-                {adminManualPosseRows.length === 0 ? (
-                  <div style={{ fontSize: 12, opacity: 0.7 }}>Sem resultados.</div>
-                ) : (
-                  adminManualPosseRows.map((row) => (
-                    <div key={row.id} style={{ padding: "4px 0", fontSize: 13 }}>
-                      {row.manual_item_nome} - {row.quantidade} un. - {row.encarregado_nome || row.subresponsavel_nome || "-"}
-                    </div>
-                  ))
-                )}
-              </div>
+                    <button
+                      onClick={() => resolverPendenciaKit(p.id)}
+                      disabled={adminPendenciasLoading}
+                      style={{
+                        padding: "2px 6px",
+                        border: "1px solid #111",
+                        borderRadius: 6,
+                        cursor: adminPendenciasLoading ? "not-allowed" : "pointer",
+                      }}
+                    >
+                      Resolver
+                    </button>
+                  </div>
+                ))
+              )}
             </div>
           </div>
 
-            {adminTrail && (
-              <div className="admin-trail-shell">
-                <div className="admin-trail-header">
-                  <div>
-                    <div className="trail-title">Trilha</div>
-                    <div className="trail-subtitle muted">
-                      {adminTrailTitle || "—"} • Última atualização: {formatDateTime(adminTrailLastUpdate)}
+          <div
+            style={{
+              border: "1px solid #ddd",
+              borderRadius: 12,
+              padding: 12,
+              background: "#fafafa",
+              marginBottom: 12,
+            }}
+          >
+            <div
+              onClick={() => setAdminOpenBusca((v) => !v)}
+              style={{ fontWeight: 800, marginBottom: 8, cursor: "pointer" }}
+            >
+              Painel Admin - Busca Global {adminOpenBusca ? "▾" : "▸"}
+            </div>
+
+            {adminOpenBusca ? (
+              <>
+                <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "center" }}>
+                  <input
+                    style={{ flex: 1, minWidth: 220, padding: 10 }}
+                    placeholder="Buscar por kit, patrimonio ou nome"
+                    value={adminQuery}
+                    onChange={(e) => setAdminQuery(e.target.value)}
+                  />
+
+                  <select
+                    style={{ padding: 10, minWidth: 180 }}
+                    value={adminSetorId}
+                    onChange={(e) => setAdminSetorId(e.target.value)}
+                  >
+                    <option value="">Todas as obras/setores</option>
+                    {setores.map((s) => (
+                      <option key={s.id} value={s.id}>
+                        {s.nome}
+                      </option>
+                    ))}
+                  </select>
+
+                  <button
+                    onClick={runAdminBusca}
+                    disabled={adminLoading}
+                    style={{
+                      padding: "10px 12px",
+                      border: "1px solid #111",
+                      borderRadius: 10,
+                      background: "#111",
+                      color: "#fff",
+                      cursor: adminLoading ? "not-allowed" : "pointer",
+                      fontWeight: 800,
+                    }}
+                  >
+                    {adminLoading ? "Buscando..." : "Buscar"}
+                  </button>
+                </div>
+
+                {adminErr ? (
+                  <div style={{ background: "#ffe8e8", border: "1px solid #ffb3b3", padding: 10, marginBottom: 12 }}>
+                    <b>Erro:</b> {adminErr}
+                  </div>
+                ) : null}
+
+                <div className="admin-results-grid">
+                  <div className="admin-panel-card">
+                    <h3>Kits</h3>
+                    <div className="admin-list-scroll">
+                      {adminKits.length === 0 ? (
+                        <div style={{ fontSize: 12, opacity: 0.7 }}>Sem resultados.</div>
+                      ) : (
+                        adminKits.map((k) => (
+                          <div key={k.id} style={{ display: "flex", justifyContent: "space-between", gap: 8, padding: "4px 0" }}>
+                            <div>#{k.id} {k.nome}</div>
+                            <button
+                              onClick={() => openTrailKit(k)}
+                              style={{ padding: "2px 6px", border: "1px solid #111", borderRadius: 6, cursor: "pointer" }}
+                            >
+                              Trilha
+                            </button>
+                          </div>
+                        ))
+                      )}
                     </div>
                   </div>
 
-                  <div className="trail-actions">
+                  <div className="admin-panel-card">
+                    <h3>Itens (patrimônio)</h3>
+                    <div className="admin-list-scroll">
+                      {adminItens.length === 0 ? (
+                        <div style={{ fontSize: 12, opacity: 0.7 }}>Sem resultados.</div>
+                      ) : (
+                        adminItens.map((it) => (
+                          <div key={it.id} style={{ display: "flex", justifyContent: "space-between", gap: 8, padding: "4px 0" }}>
+                            <div>{it.patrimonio}</div>
+                            <button
+                              onClick={() => openTrailPatrimonio(it)}
+                              style={{ padding: "2px 6px", border: "1px solid #111", borderRadius: 6, cursor: "pointer" }}
+                            >
+                              Trilha
+                            </button>
+                          </div>
+                        ))
+                      )}
+                    </div>
+                  </div>
+
+                  <div className="admin-panel-card">
+                    <h3>Posse manual (atual)</h3>
+                    <div className="admin-list-scroll">
+                      {adminManualPosseRows.length === 0 ? (
+                        <div style={{ fontSize: 12, opacity: 0.7 }}>Sem resultados.</div>
+                      ) : (
+                        adminManualPosseRows.map((row) => (
+                          <div key={row.id} style={{ padding: "4px 0", fontSize: 13 }}>
+                            {row.manual_item_nome} - {row.quantidade} un. - {row.encarregado_nome || row.subresponsavel_nome || "-"}
+                          </div>
+                        ))
+                      )}
+                    </div>
+                  </div>
+                </div>
+
+                {adminOpenTrilha && adminTrail ? (
+                  <div className="admin-trail-shell" style={{ marginTop: 12 }}>
+                    <div className="admin-trail-header">
+                      <div>
+                        <div className="trail-title">Trilha</div>
+                        <div className="trail-subtitle muted">
+                          {adminTrailTitle || "—"} • Última atualização: {formatDateTime(adminTrailLastUpdate)}
+                        </div>
+                      </div>
+
+                      <div className="trail-actions">
+                        <button
+                          type="button"
+                          className="btn-secondary"
+                          onClick={() => setAdminTrailShowTech((v) => !v)}
+                        >
+                          {adminTrailShowTech ? "Ocultar técnico" : "Ver técnico"}
+                        </button>
+                      </div>
+                    </div>
+
+                    <div className="admin-trail-grid-top">
+                      <div className="trail-card">
+                        <div className="trail-card-title">Checklist</div>
+                        <div className="trail-card-body">
+                          {adminTrailChecklists.length ? (
+                            adminTrailChecklists.slice(0, 3).map((c) => (
+                              <div key={c.id || c.data_hora} className="trail-item">
+                                <div>
+                                  <strong>Quando:</strong> {formatDateTime(c.data_hora)}
+                                </div>
+                                <div>
+                                  <strong>Kit:</strong> {c.kit_nome || c.kit_id || "—"}
+                                </div>
+                                <div>
+                                  <strong>Patrimônios:</strong> {c.patrimonios_declarados || "—"}
+                                </div>
+                              </div>
+                            ))
+                          ) : (
+                            <div className="muted">Nenhum checklist nesta trilha.</div>
+                          )}
+                        </div>
+                      </div>
+
+                      <div className="trail-card trail-termos-wide">
+                        <div className="trail-card-title">
+                          <span>Termos</span>
+                          {adminTrailOldTerms.length > 0 && (
+                            <button
+                              type="button"
+                              className="link-btn"
+                              onClick={() => setAdminTermsShowHistory((v) => !v)}
+                            >
+                              {adminTermsShowHistory
+                                ? "Ocultar histórico"
+                                : `Ver histórico (${adminTrailOldTerms.length})`}
+                            </button>
+                          )}
+                        </div>
+
+                        <div className="trail-card-body">
+                          {adminTrailLastTerm ? (
+                            <>
+                              <div className="trail-item">
+                                <div>
+                                  <strong>Último termo:</strong>{" "}
+                                  {adminTrailLastTerm.tipo || adminTrailLastTerm.status || "—"}
+                                </div>
+                                <div>
+                                  <strong>Assinante:</strong>{" "}
+                                  {adminTrailLastTerm.assinatura_nome || adminTrailLastTerm.nome || "—"}
+                                </div>
+                                <div>
+                                  <strong>Data:</strong>{" "}
+                                  {formatDateTime(adminTrailLastTerm.criado_em || adminTrailLastTerm.created_at)}
+                                </div>
+                              </div>
+
+                              <div className="trail-termo-text">
+                                {adminTrailLastTerm.texto_termo || adminTrailLastTerm.texto || "—"}
+                              </div>
+
+                              {adminTermsShowHistory && (
+                                <div className="trail-history">
+                                  {adminTrailOldTerms.map((t) => (
+                                    <div key={t.id || t.criado_em} className="trail-item">
+                                      <div>
+                                        <strong>{t.tipo || t.status || "Termo"}</strong>
+                                      </div>
+                                      <div className="muted">{formatDateTime(t.criado_em || t.created_at)}</div>
+                                    </div>
+                                  ))}
+                                </div>
+                              )}
+                            </>
+                          ) : (
+                            <div className="muted">
+                              Sem termo registrado: não houve cautela assinada neste registro.
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="trail-card-wide">
+                      <div className="trail-card-title">Movimentos</div>
+                      <div className="trail-card-body">
+                        {adminTrailMovements.length ? (
+                          <div className="trail-table-wrapper">
+                            <table className="admin-trail-table">
+                              <thead>
+                                <tr>
+                                  <th>Ação</th>
+                                  <th>Item</th>
+                                  <th>Qtde</th>
+                                  <th>Registrado por</th>
+                                  <th>PIN</th>
+                                  <th>Termo</th>
+                                  <th>Data</th>
+                                </tr>
+                              </thead>
+                              <tbody>
+                                {adminTrailMovements.map((m) => (
+                                  <tr key={m.id || `${m.acao}-${m.data_hora}`}>
+                                    <td>{m.acao || m.tipo || "—"}</td>
+                                    <td>{m.patrimonio || m.item_patrimonio || "—"}</td>
+                                    <td>{m.quantidade ?? "—"}</td>
+                                    <td>
+                                      {m.registrado_por_nome || m.registrado_por || m.encarregado_nome || "—"}
+                                    </td>
+                                    <td>
+                                      {m.pin_tipo && m.pin_tipo !== "NONE"
+                                        ? `${m.pin_tipo} • ${m.pin_autor_nome || m.pin_autor || "—"}`
+                                        : "—"}
+                                    </td>
+                                    <td>
+                                      {m.termo_texto ? (
+                                        <button
+                                          onClick={() => openAdminTermo(m)}
+                                          style={{
+                                            padding: "2px 6px",
+                                            border: "1px solid #111",
+                                            borderRadius: 6,
+                                            cursor: "pointer",
+                                          }}
+                                        >
+                                          Ver termo
+                                        </button>
+                                      ) : (
+                                        "—"
+                                      )}
+                                    </td>
+                                    <td>{formatDateTime(m.data_hora || m.created_at)}</td>
+                                  </tr>
+                                ))}
+                              </tbody>
+                            </table>
+                          </div>
+                        ) : (
+                          <div className="muted">Nenhum movimento nesta trilha.</div>
+                        )}
+                      </div>
+                    </div>
+
+                    {adminTrailShowTech && (
+                      <div className="trail-technical">
+                        <pre className="trail-raw">{JSON.stringify(adminTrail ?? {}, null, 2)}</pre>
+                      </div>
+                    )}
+                  </div>
+                ) : null}
+              </>
+            ) : null}
+          </div>
+
+          <div
+            style={{
+              border: "1px solid #ddd",
+              borderRadius: 12,
+              padding: 12,
+              background: "#fafafa",
+              marginBottom: 12,
+            }}
+          >
+            <div
+              onClick={() => setAdminOpenCred((v) => !v)}
+              style={{ fontWeight: 800, marginBottom: 8, cursor: "pointer" }}
+            >
+              Credenciais (Admin) {adminOpenCred ? "▾" : "▸"}
+            </div>
+            {adminOpenCred ? (
+              <>
+                <div style={{ display: "grid", gap: 12, gridTemplateColumns: "repeat(auto-fit, minmax(260px, 1fr))" }}>
+                  <div>
+                    <div style={{ fontSize: 12, fontWeight: 700, marginBottom: 6 }}>Reset de senha</div>
+                    <input
+                      style={{ width: "100%", padding: 8, marginBottom: 6 }}
+                      placeholder="ID do usuário"
+                      value={adminResetUserId}
+                      onChange={(e) => setAdminResetUserId(e.target.value)}
+                    />
+                    <input
+                      style={{ width: "100%", padding: 8, marginBottom: 6 }}
+                      placeholder="PIN admin (4 dígitos)"
+                      value={adminResetPin}
+                      onChange={(e) => setAdminResetPin(e.target.value)}
+                    />
                     <button
-                      type="button"
-                      className="btn-secondary"
-                      onClick={() => setAdminTrailShowTech((v) => !v)}
+                      onClick={handleAdminResetSenha}
+                      disabled={adminCredLoading}
+                      style={{
+                        padding: "6px 10px",
+                        border: "1px solid #111",
+                        borderRadius: 8,
+                        background: "#111",
+                        color: "#fff",
+                        cursor: adminCredLoading ? "not-allowed" : "pointer",
+                        fontWeight: 800,
+                      }}
                     >
-                      {adminTrailShowTech ? "Ocultar técnico" : "Ver técnico"}
+                      Resetar senha
+                    </button>
+                  </div>
+
+                  <div>
+                    <div style={{ fontSize: 12, fontWeight: 700, marginBottom: 6 }}>Alterar PIN subresponsável</div>
+                    <input
+                      style={{ width: "100%", padding: 8, marginBottom: 6 }}
+                      placeholder="ID do subresponsável"
+                      value={adminSubPinId}
+                      onChange={(e) => setAdminSubPinId(e.target.value)}
+                    />
+                    <input
+                      style={{ width: "100%", padding: 8, marginBottom: 6 }}
+                      placeholder="Novo PIN (6 dígitos)"
+                      value={adminSubPin}
+                      onChange={(e) => setAdminSubPin(e.target.value)}
+                    />
+                    <input
+                      style={{ width: "100%", padding: 8, marginBottom: 6 }}
+                      placeholder="Confirmar PIN (6 dígitos)"
+                      value={adminSubPinConfirm}
+                      onChange={(e) => setAdminSubPinConfirm(e.target.value)}
+                    />
+                    <input
+                      style={{ width: "100%", padding: 8, marginBottom: 6 }}
+                      placeholder="PIN admin (4 dígitos)"
+                      value={adminSubPinAdminPin}
+                      onChange={(e) => setAdminSubPinAdminPin(e.target.value)}
+                    />
+                    <button
+                      onClick={handleAdminAlterarPinSubresp}
+                      disabled={adminCredLoading}
+                      style={{
+                        padding: "6px 10px",
+                        border: "1px solid #111",
+                        borderRadius: 8,
+                        background: "#111",
+                        color: "#fff",
+                        cursor: adminCredLoading ? "not-allowed" : "pointer",
+                        fontWeight: 800,
+                      }}
+                    >
+                      Alterar PIN
                     </button>
                   </div>
                 </div>
+                {adminResetMsg ? (
+                  <div style={{ marginTop: 8, fontSize: 12, color: adminResetMsg.includes("Falha") ? "#b00020" : "#0b7a38" }}>
+                    {adminResetMsg}
+                  </div>
+                ) : null}
+              </>
+            ) : null}
+          </div>
 
-                <div className="admin-trail-grid-top">
-                  <div className="trail-card">
-                    <div className="trail-card-title">Checklist</div>
-                    <div className="trail-card-body">
-                      {adminTrailChecklists.length ? (
-                        adminTrailChecklists.slice(0, 3).map((c) => (
-                          <div key={c.id || c.data_hora} className="trail-item">
-                            <div>
-                              <strong>Quando:</strong> {formatDateTime(c.data_hora)}
+          <div
+            style={{
+              border: "1px solid #ddd",
+              borderRadius: 12,
+              padding: 12,
+              background: "#fafafa",
+              marginBottom: 12,
+            }}
+          >
+            <div
+              onClick={() => setAdminOpenUsers((v) => !v)}
+              style={{ fontWeight: 800, marginBottom: 8, cursor: "pointer" }}
+            >
+              Gestão de usuários {adminOpenUsers ? "▾" : "▸"}
+            </div>
+            {adminOpenUsers ? (
+              <>
+                <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 10 }}>
+                  <input
+                    style={{ flex: 1, minWidth: 220, padding: 8 }}
+                    placeholder="Buscar por nome ou username"
+                    value={adminUsuariosQuery}
+                    onChange={(e) => setAdminUsuariosQuery(e.target.value)}
+                  />
+                  <button
+                    onClick={loadAdminUsuarios}
+                    disabled={adminUsuariosLoading}
+                    style={{
+                      padding: "8px 12px",
+                      border: "1px solid #111",
+                      borderRadius: 8,
+                      background: "#111",
+                      color: "#fff",
+                      cursor: adminUsuariosLoading ? "not-allowed" : "pointer",
+                      fontWeight: 800,
+                    }}
+                  >
+                    {adminUsuariosLoading ? "Buscando..." : "Buscar"}
+                  </button>
+                </div>
+
+                {adminUsuariosErr ? (
+                  <div style={{ fontSize: 12, color: "#b00020", marginBottom: 8 }}>{adminUsuariosErr}</div>
+                ) : null}
+
+                <div style={{ display: "grid", gap: 12, gridTemplateColumns: "repeat(auto-fit, minmax(260px, 1fr))" }}>
+                  <div>
+                    <div style={{ fontSize: 12, fontWeight: 700, marginBottom: 6 }}>Usuários</div>
+                    <div style={{ maxHeight: 260, overflow: "auto", border: "1px solid #eee", borderRadius: 8, padding: 8 }}>
+                      {adminUsuarios.length === 0 ? (
+                        <div style={{ fontSize: 12, opacity: 0.7 }}>Sem resultados.</div>
+                      ) : (
+                        adminUsuarios.map((u) => (
+                          <div
+                            key={u.id}
+                            style={{ display: "flex", justifyContent: "space-between", gap: 8, padding: "4px 0" }}
+                          >
+                            <div style={{ fontSize: 12 }}>
+                              <div style={{ fontWeight: 700 }}>{u.nome || "—"}</div>
+                              <div style={{ opacity: 0.7 }}>
+                                {u.username} • {u.role} • {Number(u.ativo) === 1 ? "ativo" : "inativo"}
+                              </div>
                             </div>
-                            <div>
-                              <strong>Kit:</strong> {c.kit_nome || c.kit_id || "—"}
-                            </div>
-                            <div>
-                              <strong>Patrimônios:</strong> {c.patrimonios_declarados || "—"}
-                            </div>
+                            <button
+                              onClick={() => handleToggleUsuarioAtivo(u)}
+                              disabled={adminUsuariosLoading}
+                              style={{
+                                padding: "2px 6px",
+                                border: "1px solid #111",
+                                borderRadius: 6,
+                                cursor: adminUsuariosLoading ? "not-allowed" : "pointer",
+                              }}
+                            >
+                              {Number(u.ativo) === 1 ? "Desativar" : "Ativar"}
+                            </button>
                           </div>
                         ))
-                      ) : (
-                        <div className="muted">Nenhum checklist nesta trilha.</div>
                       )}
                     </div>
                   </div>
 
-                  <div className="trail-card trail-termos-wide">
-                    <div className="trail-card-title">
-                      <span>Termos</span>
-                      {adminTrailOldTerms.length > 0 && (
-                        <button
-                          type="button"
-                          className="link-btn"
-                          onClick={() => setAdminTermsShowHistory((v) => !v)}
-                        >
-                          {adminTermsShowHistory
-                            ? "Ocultar histórico"
-                            : `Ver histórico (${adminTrailOldTerms.length})`}
-                        </button>
-                      )}
-                    </div>
+                  <div>
+                    <div style={{ fontSize: 12, fontWeight: 700, marginBottom: 6 }}>Criar usuário</div>
+                    <input
+                      style={{ width: "100%", padding: 8, marginBottom: 6 }}
+                      placeholder="Nome completo"
+                      value={adminNovoUsuario.nome_completo}
+                      onChange={(e) => setAdminNovoUsuario((prev) => ({ ...prev, nome_completo: e.target.value }))}
+                    />
+                    <input
+                      style={{ width: "100%", padding: 8, marginBottom: 6 }}
+                      placeholder="Username"
+                      value={adminNovoUsuario.username}
+                      onChange={(e) => setAdminNovoUsuario((prev) => ({ ...prev, username: e.target.value }))}
+                    />
+                    <select
+                      style={{ width: "100%", padding: 8, marginBottom: 6 }}
+                      value={adminNovoUsuario.perfil}
+                      onChange={(e) => setAdminNovoUsuario((prev) => ({ ...prev, perfil: e.target.value }))}
+                    >
+                      <option value="ENCARREGADO">Encarregado</option>
+                      <option value="SUPERVISOR">Supervisor</option>
+                      <option value="ADMIN">Admin</option>
+                      <option value="MANUTENCAO">Operador</option>
+                    </select>
+                    <input
+                      style={{ width: "100%", padding: 8, marginBottom: 6 }}
+                      placeholder="ID subresponsável (opcional)"
+                      value={adminNovoUsuario.subresponsavel_id}
+                      onChange={(e) => setAdminNovoUsuario((prev) => ({ ...prev, subresponsavel_id: e.target.value }))}
+                    />
+                    <input
+                      style={{ width: "100%", padding: 8, marginBottom: 6 }}
+                      placeholder="ID encarregado (opcional)"
+                      value={adminNovoUsuario.encarregado_id}
+                      onChange={(e) => setAdminNovoUsuario((prev) => ({ ...prev, encarregado_id: e.target.value }))}
+                    />
+                    <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, marginBottom: 6 }}>
+                      <input
+                        type="checkbox"
+                        checked={adminNovoUsuario.ativo}
+                        onChange={(e) => setAdminNovoUsuario((prev) => ({ ...prev, ativo: e.target.checked }))}
+                      />
+                      Ativo
+                    </label>
+                    <button
+                      onClick={handleCriarUsuarioAdmin}
+                      disabled={adminUsuariosLoading}
+                      style={{
+                        padding: "6px 10px",
+                        border: "1px solid #111",
+                        borderRadius: 8,
+                        background: "#111",
+                        color: "#fff",
+                        cursor: adminUsuariosLoading ? "not-allowed" : "pointer",
+                        fontWeight: 800,
+                      }}
+                    >
+                      Criar usuário
+                    </button>
+                  </div>
 
-                    <div className="trail-card-body">
-                      {adminTrailLastTerm ? (
-                        <>
-                          <div className="trail-item">
-                            <div>
-                              <strong>Último termo:</strong>{" "}
-                              {adminTrailLastTerm.tipo || adminTrailLastTerm.status || "—"}
-                            </div>
-                            <div>
-                              <strong>Assinante:</strong>{" "}
-                              {adminTrailLastTerm.assinatura_nome || adminTrailLastTerm.nome || "—"}
-                            </div>
-                            <div>
-                              <strong>Data:</strong>{" "}
-                              {formatDateTime(adminTrailLastTerm.criado_em || adminTrailLastTerm.created_at)}
-                            </div>
-                          </div>
+                  <div>
+                    <div style={{ fontSize: 12, fontWeight: 700, marginBottom: 6 }}>Criar subresponsável</div>
+                    <input
+                      style={{ width: "100%", padding: 8, marginBottom: 6 }}
+                      placeholder="Nome"
+                      value={adminNovoSubresp.nome}
+                      onChange={(e) => setAdminNovoSubresp((prev) => ({ ...prev, nome: e.target.value }))}
+                    />
+                    <input
+                      style={{ width: "100%", padding: 8, marginBottom: 6 }}
+                      placeholder="Seção (opcional)"
+                      value={adminNovoSubresp.secao}
+                      onChange={(e) => setAdminNovoSubresp((prev) => ({ ...prev, secao: e.target.value }))}
+                    />
+                    <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, marginBottom: 6 }}>
+                      <input
+                        type="checkbox"
+                        checked={adminNovoSubresp.ativo}
+                        onChange={(e) => setAdminNovoSubresp((prev) => ({ ...prev, ativo: e.target.checked }))}
+                      />
+                      Ativo
+                    </label>
+                    <button
+                      onClick={handleCriarSubresponsavelAdmin}
+                      disabled={adminUsuariosLoading}
+                      style={{
+                        padding: "6px 10px",
+                        border: "1px solid #111",
+                        borderRadius: 8,
+                        background: "#111",
+                        color: "#fff",
+                        cursor: adminUsuariosLoading ? "not-allowed" : "pointer",
+                        fontWeight: 800,
+                      }}
+                    >
+                      Criar subresponsável
+                    </button>
+                  </div>
+                </div>
+              </>
+            ) : null}
+          </div>
 
-                          <div className="trail-termo-text">
-                            {adminTrailLastTerm.texto_termo || adminTrailLastTerm.texto || "—"}
-                          </div>
 
-                          {adminTermsShowHistory && (
-                            <div className="trail-history">
-                              {adminTrailOldTerms.map((t) => (
-                                <div key={t.id || t.criado_em} className="trail-item">
-                                  <div>
-                                    <strong>{t.tipo || t.status || "Termo"}</strong>
-                                  </div>
-                                  <div className="muted">{formatDateTime(t.criado_em || t.created_at)}</div>
-                                </div>
-                              ))}
-                            </div>
-                          )}
-                        </>
-                      ) : (
-                        <div className="muted">
-                          Sem termo registrado: não houve cautela assinada neste registro.
+            {adminOpDetailOpen ? (
+              <div
+                onClick={() => {
+                  if (!adminOpActionLoading) setAdminOpDetailOpen(false);
+                }}
+                style={{
+                  position: "fixed",
+                  inset: 0,
+                  background: "rgba(0,0,0,0.5)",
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  zIndex: 99999,
+                  padding: 16,
+                }}
+              >
+                <div
+                  onClick={(e) => e.stopPropagation()}
+                  style={{
+                    width: "min(640px, 94vw)",
+                    background: "#fff",
+                    color: "#111",
+                    borderRadius: 12,
+                    padding: 16,
+                    boxShadow: "0 20px 60px rgba(0,0,0,.35)",
+                  }}
+                >
+                  <div style={{ fontWeight: 900, fontSize: 16, marginBottom: 8 }}>
+                    Detalhe da pendência
+                  </div>
+                  {adminOpDetailLoading ? (
+                    <div style={{ fontSize: 12, opacity: 0.7 }}>Carregando...</div>
+                  ) : adminOpDetail ? (
+                    <>
+                      <div style={{ display: "grid", gap: 6, fontSize: 12, marginBottom: 10 }}>
+                        <div>
+                          <b>Tipo:</b> {adminOpDetail.tipo || "—"}
                         </div>
-                      )}
-                    </div>
-                  </div>
-                </div>
-
-                <div className="trail-card-wide">
-                  <div className="trail-card-title">Movimentos</div>
-                  <div className="trail-card-body">
-                    {adminTrailMovements.length ? (
-                      <div className="trail-table-wrapper">
-                        <table className="admin-trail-table">
-                          <thead>
-                            <tr>
-                              <th>Ação</th>
-                              <th>Item</th>
-                              <th>Qtde</th>
-                              <th>Registrado por</th>
-                              <th>PIN</th>
-                              <th>Data</th>
-                            </tr>
-                          </thead>
-                          <tbody>
-                            {adminTrailMovements.map((m) => (
-                              <tr key={m.id || `${m.acao}-${m.data_hora}`}>
-                                <td>{m.acao || m.tipo || "—"}</td>
-                                <td>{m.patrimonio || m.item_patrimonio || "—"}</td>
-                                <td>{m.quantidade ?? "—"}</td>
-                                <td>
-                                  {m.registrado_por_nome || m.encarregado_nome || m.registrado_por || "—"}
-                                </td>
-                                <td>{m.subresponsavel_nome || (m.admin_pin_usado ? "Admin" : "—")}</td>
-                                <td>{formatDateTime(m.data_hora || m.created_at)}</td>
-                              </tr>
-                            ))}
-                          </tbody>
-                        </table>
+                        <div>
+                          <b>Status:</b> {adminOpDetail.status || "—"}
+                        </div>
+                        <div>
+                          <b>Solicitante:</b>{" "}
+                          {adminOpDetail.solicitante?.nome || "—"} (
+                          {adminOpDetail.solicitante?.username || "—"})
+                        </div>
+                        <div>
+                          <b>Criado em:</b> {formatDateTime(adminOpDetail.criado_em)}
+                        </div>
+                        <div>
+                          <b>Kit:</b> {adminOpDetail.contexto?.kit?.nome || "—"}
+                        </div>
+                        <div>
+                          <b>Item:</b>{" "}
+                          {adminOpDetail.contexto?.item_original?.patrimonio ||
+                            adminOpDetail.contexto?.item_original?.descricao ||
+                            "—"}
+                        </div>
                       </div>
-                    ) : (
-                      <div className="muted">Nenhum movimento nesta trilha.</div>
-                    )}
+
+                      {adminOpDetail.tipo === "SOLICITACAO" ? (
+                        <div style={{ marginBottom: 12 }}>
+                          <div style={{ fontSize: 12, fontWeight: 700, marginBottom: 6 }}>
+                            Conferência de itens
+                          </div>
+                          <div style={{ display: "grid", gap: 8 }}>
+                            {adminEntregaItens.map((it) => (
+                              <div
+                                key={it.solicitacao_item_id}
+                                style={{
+                                  border: "1px solid #eee",
+                                  borderRadius: 8,
+                                  padding: 8,
+                                  display: "grid",
+                                  gap: 6,
+                                }}
+                              >
+                                <div style={{ fontSize: 12 }}>
+                                  <b>{it.patrimonio}</b> • {it.descricao}
+                                </div>
+                                <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                                  <select
+                                    value={it.status}
+                                    onChange={(e) =>
+                                      updateAdminEntregaItem(it.solicitacao_item_id, { status: e.target.value })
+                                    }
+                                    style={{ padding: 6, minWidth: 140 }}
+                                  >
+                                    <option value="PRESENTE">PRESENTE</option>
+                                    <option value="AUSENTE">AUSENTE</option>
+                                    <option value="DEFEITO">DEFEITO</option>
+                                  </select>
+
+                                  {it.status !== "PRESENTE" ? (
+                                    <select
+                                      value={it.acao}
+                                      onChange={(e) =>
+                                        updateAdminEntregaItem(it.solicitacao_item_id, { acao: e.target.value })
+                                      }
+                                      style={{ padding: 6, minWidth: 180 }}
+                                    >
+                                      <option value="SUBSTITUICAO">Gerar substituição</option>
+                                      <option value="PENDENCIA">Entregar com pendência</option>
+                                    </select>
+                                  ) : null}
+                                </div>
+
+                                {it.status !== "PRESENTE" ? (
+                                  <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                                    <input
+                                      value={it.motivo}
+                                      onChange={(e) =>
+                                        updateAdminEntregaItem(it.solicitacao_item_id, { motivo: e.target.value })
+                                      }
+                                      placeholder="Motivo (ex.: DEFEITO)"
+                                      style={{ flex: 1, minWidth: 160, padding: 6 }}
+                                    />
+                                    <input
+                                      value={it.observacao}
+                                      onChange={(e) =>
+                                        updateAdminEntregaItem(it.solicitacao_item_id, { observacao: e.target.value })
+                                      }
+                                      placeholder="Observação"
+                                      style={{ flex: 1, minWidth: 160, padding: 6 }}
+                                    />
+                                  </div>
+                                ) : null}
+                              </div>
+                            ))}
+                          </div>
+
+                          <div style={{ display: "grid", gap: 6, marginTop: 10 }}>
+                            <input
+                              value={adminEntregaPinAdmin}
+                              onChange={(e) => setAdminEntregaPinAdmin(e.target.value)}
+                              placeholder="PIN admin (4 dígitos)"
+                              style={{ padding: 8 }}
+                            />
+                          </div>
+                        </div>
+                      ) : null}
+
+                      {adminOpDetail.tipo === "DEVOLUCAO" ? (
+                        <div style={{ marginBottom: 12 }}>
+                          <div style={{ fontSize: 12, fontWeight: 700, marginBottom: 6 }}>
+                            Conferência de devolução
+                          </div>
+                          <div style={{ display: "grid", gap: 8 }}>
+                            {adminDevolucaoItens.map((it) => (
+                              <div
+                                key={it.item_id}
+                                style={{
+                                  border: "1px solid #eee",
+                                  borderRadius: 8,
+                                  padding: 8,
+                                  display: "grid",
+                                  gap: 6,
+                                }}
+                              >
+                                <div style={{ fontSize: 12 }}>
+                                  <b>{it.patrimonio}</b> • {it.descricao}
+                                </div>
+                                <select
+                                  value={it.status}
+                                  onChange={(e) =>
+                                    updateAdminDevolucaoItem(it.item_id, { status: e.target.value })
+                                  }
+                                  style={{ padding: 6, minWidth: 140 }}
+                                >
+                                  <option value="PRESENTE">PRESENTE</option>
+                                  <option value="AUSENTE">AUSENTE</option>
+                                </select>
+
+                                {it.status === "AUSENTE" ? (
+                                  <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                                    <select
+                                      value={it.motivo}
+                                      onChange={(e) =>
+                                        updateAdminDevolucaoItem(it.item_id, { motivo: e.target.value })
+                                      }
+                                      style={{ padding: 6, minWidth: 160 }}
+                                    >
+                                      <option value="">Motivo</option>
+                                      <option value="PERDA">PERDA</option>
+                                      <option value="FURTO">FURTO</option>
+                                    </select>
+                                    <input
+                                      value={it.anexo_path}
+                                      onChange={(e) =>
+                                        updateAdminDevolucaoItem(it.item_id, { anexo_path: e.target.value })
+                                      }
+                                      placeholder="Caminho do BO/termo"
+                                      style={{ flex: 1, minWidth: 180, padding: 6 }}
+                                    />
+                                  </div>
+                                ) : null}
+                              </div>
+                            ))}
+                          </div>
+                          <input
+                            value={adminDevolucaoPinAdmin}
+                            onChange={(e) => setAdminDevolucaoPinAdmin(e.target.value)}
+                            placeholder="PIN admin (4 dígitos)"
+                            style={{ padding: 8, marginTop: 10, width: "100%" }}
+                          />
+                        </div>
+                      ) : null}
+
+                      {adminOpDetail.tipo === "SUBSTITUICAO" ? (
+                        <div style={{ marginBottom: 10 }}>
+                          <label style={{ fontSize: 12, opacity: 0.8 }}>
+                            Substituto equivalente ({adminDescricaoCanonica || "sem descricao"})
+                          </label>
+                          {adminSubstBloqueada ? (
+                            <div style={{ fontSize: 12, color: "#b00020", marginTop: 6 }}>
+                              Item sem classe_tipo — substituição bloqueada.
+                            </div>
+                          ) : null}
+                          {adminSubstitutosDisponiveis.length ? (
+                            <select
+                              style={{ width: "100%", padding: 10, marginTop: 4 }}
+                              value={adminSubstitutoId}
+                              onChange={(e) => setAdminSubstitutoId(e.target.value)}
+                            >
+                              <option value="">Selecione o substituto</option>
+                              {adminSubstitutosDisponiveis.map((it) => (
+                                <option key={it.id} value={it.id}>
+                                  {it.patrimonio} - {it.descricao}
+                                </option>
+                              ))}
+                            </select>
+                          ) : (
+                            <input
+                              style={{ width: "100%", padding: 10, marginTop: 4 }}
+                              value={adminSubstitutoId}
+                              onChange={(e) => setAdminSubstitutoId(e.target.value)}
+                              placeholder={adminSubstitutosLoading ? "Carregando substitutos..." : "Ex: 777"}
+                              disabled={adminSubstitutosLoading}
+                            />
+                          )}
+                        </div>
+                      ) : null}
+                    </>
+                  ) : (
+                    <div style={{ fontSize: 12, color: "#b00020" }}>
+                      Não foi possível carregar o detalhe.
+                    </div>
+                  )}
+
+                  <div style={{ display: "flex", justifyContent: "flex-end", gap: 10, marginTop: 12 }}>
+                    <button
+                      onClick={() => setAdminOpDetailOpen(false)}
+                      disabled={adminOpActionLoading}
+                      style={{
+                        padding: "8px 12px",
+                        borderRadius: 8,
+                        border: "1px solid #aaa",
+                        cursor: adminOpActionLoading ? "not-allowed" : "pointer",
+                      }}
+                    >
+                      Fechar
+                    </button>
+
+                    {adminOpDetail?.tipo === "SOLICITACAO" ? (
+                      <button
+                        onClick={confirmarEntregaAdmin}
+                        disabled={adminOpActionLoading}
+                        style={{
+                          padding: "8px 12px",
+                          borderRadius: 8,
+                          border: "1px solid #111",
+                          background: "#111",
+                          color: "#fff",
+                          cursor: adminOpActionLoading ? "not-allowed" : "pointer",
+                          fontWeight: 800,
+                        }}
+                      >
+                        {adminOpActionLoading ? "Processando..." : "Concluir entrega"}
+                      </button>
+                    ) : null}
+
+                    {adminOpDetail?.tipo === "SUBSTITUICAO" ? (
+                      <button
+                        onClick={aprovarSubstituicaoAdmin}
+                        disabled={
+                          adminOpActionLoading ||
+                          adminSubstBloqueada ||
+                          !adminSubstitutoId
+                        }
+                        style={{
+                          padding: "8px 12px",
+                          borderRadius: 8,
+                          border: "1px solid #111",
+                          background: "#111",
+                          color: "#fff",
+                          cursor: adminOpActionLoading ? "not-allowed" : "pointer",
+                          fontWeight: 800,
+                        }}
+                      >
+                        {adminOpActionLoading ? "Processando..." : "Aprovar substituição"}
+                      </button>
+                    ) : null}
+
+                    {adminOpDetail?.tipo === "DEVOLUCAO" ? (
+                      <button
+                        onClick={confirmarDevolucaoDetalhada}
+                        disabled={adminOpActionLoading}
+                        style={{
+                          padding: "8px 12px",
+                          borderRadius: 8,
+                          border: "1px solid #111",
+                          background: "#111",
+                          color: "#fff",
+                          cursor: adminOpActionLoading ? "not-allowed" : "pointer",
+                          fontWeight: 800,
+                        }}
+                      >
+                        {adminOpActionLoading ? "Processando..." : "Confirmar devolução"}
+                      </button>
+                    ) : null}
                   </div>
                 </div>
-
-                {adminTrailShowTech && (
-                  <div className="trail-technical">
-                    <pre className="trail-raw">{JSON.stringify(adminTrail ?? {}, null, 2)}</pre>
-                  </div>
-                )}
               </div>
-            )}
+            ) : null}
+
+            {adminTermoOpen ? (
+              <div
+                onClick={() => setAdminTermoOpen(false)}
+                style={{
+                  position: "fixed",
+                  inset: 0,
+                  background: "rgba(0,0,0,0.5)",
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  zIndex: 99999,
+                  padding: 16,
+                }}
+              >
+                <div
+                  onClick={(e) => e.stopPropagation()}
+                  style={{
+                    width: "min(720px, 96vw)",
+                    background: "#fff",
+                    color: "#111",
+                    borderRadius: 12,
+                    padding: 16,
+                    boxShadow: "0 20px 60px rgba(0,0,0,.35)",
+                  }}
+                >
+                  <div style={{ fontWeight: 900, fontSize: 16, marginBottom: 8 }}>Termo vinculado</div>
+                  <div style={{ fontSize: 12, opacity: 0.8, marginBottom: 10 }}>
+                    {adminTermoMeta?.tipo || "—"} • {adminTermoMeta?.assinante || "—"} •{" "}
+                    {formatDateTime(adminTermoMeta?.criado_em)}
+                  </div>
+                  <textarea
+                    readOnly
+                    value={adminTermoTexto || "—"}
+                    style={{ width: "100%", minHeight: 200, padding: 10, fontSize: 12 }}
+                  />
+                  <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 12 }}>
+                    <button
+                      onClick={() => setAdminTermoOpen(false)}
+                      style={{
+                        padding: "8px 12px",
+                        borderRadius: 8,
+                        border: "1px solid #111",
+                        background: "#111",
+                        color: "#fff",
+                        cursor: "pointer",
+                        fontWeight: 800,
+                      }}
+                    >
+                      Fechar
+                    </button>
+                  </div>
+                </div>
+              </div>
+            ) : null}
         </div>
       )}
 
@@ -4028,6 +5731,30 @@ export default function App() {
               <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
                 <div style={{ fontWeight: 800 }}>{previewSelecionado.data?.nome || "Kit selecionado"}</div>
                 <div style={{ fontSize: 12, opacity: 0.8 }}>{formatKitLabel(previewSelecionado.data)}</div>
+                <div
+                  style={{
+                    border: "1px solid rgba(255,255,255,0.15)",
+                    borderRadius: 10,
+                    padding: 10,
+                    maxHeight: 180,
+                    overflowY: "auto",
+                    fontSize: 12,
+                    background: "rgba(0,0,0,0.2)",
+                  }}
+                >
+                  <div style={{ fontWeight: 700, marginBottom: 6 }}>Itens do kit</div>
+                  {kitItens.length === 0 ? (
+                    <div style={{ opacity: 0.7 }}>Sem itens carregados para este kit.</div>
+                  ) : (
+                    kitItens.map((it, idx) => (
+                      <div key={it.kit_item_id ?? `${it.patrimonio}-${idx}`} style={{ padding: "2px 0" }}>
+                        <span style={{ fontWeight: 600 }}>{it.patrimonio || "—"}</span>
+                        {" — "}
+                        <span>{it.descricao || "Item"}</span>
+                      </div>
+                    ))
+                  )}
+                </div>
                 <button
                   type="button"
                   onClick={() => {

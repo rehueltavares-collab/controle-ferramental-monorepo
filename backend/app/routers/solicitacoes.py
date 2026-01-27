@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from typing import List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -8,6 +9,8 @@ from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from ..core.auth import get_current_token, get_db, require_roles, get_user_row
+from ..routers.movimentos import ensure_movimentos_columns
+from ..utils.normalizer import normalize_desc
 from ..utils.security import verify_pin
 
 
@@ -64,6 +67,7 @@ def ensure_operacoes_table(db: Session) -> None:
               kit_id INT NULL,
               item_id INT NULL,
               item_substituto_id INT NULL,
+              pendente_key VARCHAR(120) NULL,
               solicitante_user_id INT NOT NULL,
               encarregado_id INT NULL,
               subresponsavel_id INT NULL,
@@ -76,7 +80,184 @@ def ensure_operacoes_table(db: Session) -> None:
             """
         )
     )
+    try:
+        db.execute(text("ALTER TABLE solicitacoes_operacao ADD COLUMN pendente_key VARCHAR(120) NULL"))
+    except Exception:
+        pass
+    _dedupe_substituicoes_pendentes(db)
+    _dedupe_devolucoes_pendentes(db)
+    try:
+        db.execute(
+            text(
+                "CREATE UNIQUE INDEX ux_solicitacoes_operacao_pendente_key ON solicitacoes_operacao (pendente_key)"
+            )
+        )
+    except Exception:
+        pass
     db.commit()
+
+
+def ensure_itens_columns(db: Session) -> None:
+    columns = [
+        ("classe_tipo", "VARCHAR(50) NULL"),
+        ("descricao_canonica", "VARCHAR(255) NULL"),
+        ("disponivel", "INT NOT NULL DEFAULT 1"),
+    ]
+    for column, col_type in columns:
+        try:
+            db.execute(text(f"ALTER TABLE itens ADD COLUMN {column} {col_type}"))
+        except Exception:
+            pass
+    rows = db.execute(
+        text("SELECT id, descricao FROM itens WHERE descricao_canonica IS NULL AND descricao IS NOT NULL")
+    ).mappings().all()
+    for row in rows:
+        canon = normalize_desc(row.get("descricao"))
+        if not canon:
+            continue
+        db.execute(
+            text("UPDATE itens SET descricao_canonica = :canon WHERE id = :id"),
+            {"canon": canon, "id": row["id"]},
+        )
+    db.commit()
+
+
+def _dedupe_substituicoes_pendentes(db: Session) -> None:
+    rows = db.execute(
+        text(
+            """
+            SELECT id, kit_id, item_id, pendente_key
+            FROM solicitacoes_operacao
+            WHERE tipo = 'SUBSTITUICAO_ITEM' AND status = 'PENDENTE'
+            ORDER BY id ASC
+            """
+        )
+    ).mappings().all()
+    seen = set()
+    for row in rows:
+        kit_id = row.get("kit_id")
+        item_id = row.get("item_id")
+        if not kit_id or not item_id:
+            continue
+        key = f"SUBSTITUICAO_ITEM:{kit_id}:{item_id}"
+        if key in seen:
+            db.execute(text("DELETE FROM solicitacoes_operacao WHERE id = :id"), {"id": row["id"]})
+            continue
+        seen.add(key)
+        if row.get("pendente_key") != key:
+            # Evita violar UNIQUE quando existir histórico com a mesma chave
+            db.execute(
+                text(
+                    """
+                    UPDATE solicitacoes_operacao
+                    SET pendente_key = NULL
+                    WHERE pendente_key = :key AND status <> 'PENDENTE'
+                    """
+                ),
+                {"key": key},
+            )
+            db.execute(
+                text("UPDATE solicitacoes_operacao SET pendente_key = :key WHERE id = :id"),
+                {"key": key, "id": row["id"]},
+            )
+
+
+def _dedupe_devolucoes_pendentes(db: Session) -> None:
+    rows = db.execute(
+        text(
+            """
+            SELECT id, tipo, kit_id, item_id, pendente_key
+            FROM solicitacoes_operacao
+            WHERE tipo IN ('DEVOLUCAO_KIT','DEVOLUCAO_AVULSO') AND status = 'PENDENTE'
+            ORDER BY id ASC
+            """
+        )
+    ).mappings().all()
+    seen = set()
+    for row in rows:
+        if row.get("tipo") == "DEVOLUCAO_KIT" and row.get("kit_id"):
+            key = f"DEVOLUCAO_KIT:{row['kit_id']}"
+        elif row.get("tipo") == "DEVOLUCAO_AVULSO" and row.get("item_id"):
+            key = f"DEVOLUCAO_AVULSO:{row['item_id']}"
+        else:
+            continue
+        if key in seen:
+            db.execute(text("DELETE FROM solicitacoes_operacao WHERE id = :id"), {"id": row["id"]})
+            continue
+        seen.add(key)
+        if row.get("pendente_key") != key:
+            # Evita violar UNIQUE quando existir histórico com a mesma chave
+            db.execute(
+                text(
+                    """
+                    UPDATE solicitacoes_operacao
+                    SET pendente_key = NULL
+                    WHERE pendente_key = :key AND status <> 'PENDENTE'
+                    """
+                ),
+                {"key": key},
+            )
+            db.execute(
+                text("UPDATE solicitacoes_operacao SET pendente_key = :key WHERE id = :id"),
+                {"key": key, "id": row["id"]},
+            )
+
+
+def ensure_subresponsavel_pin_hash(db: Session) -> None:
+    try:
+        db.execute(text("ALTER TABLE subresponsaveis ADD COLUMN pin_hash TEXT NULL"))
+    except Exception:
+        pass
+    rows = db.execute(
+        text("SELECT id, pin FROM subresponsaveis WHERE pin_hash IS NULL AND pin IS NOT NULL")
+    ).mappings().all()
+    from ..utils.security import hash_pin
+    for row in rows:
+        try:
+            db.execute(
+                text("UPDATE subresponsaveis SET pin_hash=:ph, pin=NULL WHERE id=:id"),
+                {"ph": hash_pin(str(row["pin"]).strip()), "id": row["id"]},
+            )
+        except Exception:
+            pass
+    db.commit()
+
+
+def ensure_user_admin_pin(db: Session) -> None:
+    try:
+        db.execute(text("ALTER TABLE users ADD COLUMN admin_pin_hash TEXT NULL"))
+    except Exception:
+        pass
+    try:
+        db.execute(text("ALTER TABLE users ADD COLUMN precisa_definir_pin INT NOT NULL DEFAULT 1"))
+    except Exception:
+        pass
+    db.commit()
+
+
+def ensure_kit_pendencias(db: Session) -> None:
+    db.execute(
+        text(
+            """
+            CREATE TABLE IF NOT EXISTS kit_pendencias (
+              id INT AUTO_INCREMENT PRIMARY KEY,
+              kit_id INT NOT NULL,
+              item_id INT NULL,
+              descricao_canonica VARCHAR(255) NULL,
+              motivo VARCHAR(50) NOT NULL,
+              observacao TEXT NULL,
+              status VARCHAR(20) NOT NULL DEFAULT 'ABERTA',
+              criado_em DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+              encerrado_em DATETIME NULL
+            )
+            """
+        )
+    )
+    db.commit()
+
+
+def normalize_model(value: str) -> str:
+    return normalize_desc(value)
 
 
 class SolicitacaoManualItem(BaseModel):
@@ -114,9 +295,10 @@ class AdminPinIn(BaseModel):
 
 
 def require_admin_pin(db: Session, payload: dict, admin_pin: Optional[str]) -> None:
+    ensure_user_admin_pin(db)
     pin = (admin_pin or "").strip()
-    if not (pin.isdigit() and len(pin) == 6):
-        raise HTTPException(status_code=400, detail="PIN admin deve ter 6 digitos")
+    if not (pin.isdigit() and len(pin) == 4):
+        raise HTTPException(status_code=400, detail="PIN admin deve ter 4 digitos")
     row = db.execute(
         text("SELECT admin_pin_hash FROM users WHERE id = :uid"),
         {"uid": int(payload["uid"])},
@@ -134,6 +316,7 @@ def criar_solicitacao_manual(
     payload: dict = Depends(get_current_token),
 ):
     ensure_tables(db)
+    ensure_subresponsavel_pin_hash(db)
 
     sub_id = payload.get("subresponsavel_id")
     enc_id = payload.get("encarregado_id")
@@ -267,7 +450,7 @@ def criar_solicitacao_operacao(
     ensure_operacoes_table(db)
 
     tipo = (body.tipo or "").strip().upper()
-    if tipo not in ("DEVOLUCAO_KIT", "SUBSTITUICAO_ITEM", "ADICAO_AVULSO"):
+    if tipo not in ("DEVOLUCAO_KIT", "DEVOLUCAO_AVULSO", "SUBSTITUICAO_ITEM", "ADICAO_AVULSO"):
         raise HTTPException(status_code=400, detail="Tipo de solicitacao invalido")
 
     sub_id = payload.get("subresponsavel_id")
@@ -280,14 +463,37 @@ def criar_solicitacao_operacao(
     if sub_id is None and enc_id is None:
         raise HTTPException(status_code=400, detail="Usuario sem subresponsavel_id ou encarregado_id")
 
+    pendente_key = None
+    if tipo == "SUBSTITUICAO_ITEM" and body.kit_id and body.item_id:
+        pendente_key = f"SUBSTITUICAO_ITEM:{int(body.kit_id)}:{int(body.item_id)}"
+    elif tipo == "DEVOLUCAO_KIT" and body.kit_id:
+        pendente_key = f"DEVOLUCAO_KIT:{int(body.kit_id)}"
+    elif tipo == "DEVOLUCAO_AVULSO" and body.item_id:
+        pendente_key = f"DEVOLUCAO_AVULSO:{int(body.item_id)}"
+
+    if pendente_key:
+        existing = db.execute(
+            text(
+                """
+                SELECT id
+                FROM solicitacoes_operacao
+                WHERE pendente_key = :key AND status = 'PENDENTE'
+                LIMIT 1
+                """
+            ),
+            {"key": pendente_key},
+        ).first()
+        if existing:
+            return {"ok": True, "solicitacao_id": existing[0], "duplicado": True}
+
     db.execute(
         text(
             """
             INSERT INTO solicitacoes_operacao
-              (tipo, kit_id, item_id, item_substituto_id, solicitante_user_id,
+              (tipo, kit_id, item_id, item_substituto_id, pendente_key, solicitante_user_id,
                encarregado_id, subresponsavel_id, status, observacao)
             VALUES
-              (:tipo, :kit_id, :item_id, :item_substituto_id, :uid,
+              (:tipo, :kit_id, :item_id, :item_substituto_id, :pendente_key, :uid,
                :enc_id, :sub_id, 'PENDENTE', :obs)
             """
         ),
@@ -296,6 +502,7 @@ def criar_solicitacao_operacao(
             "kit_id": body.kit_id,
             "item_id": body.item_id,
             "item_substituto_id": body.item_substituto_id,
+            "pendente_key": pendente_key,
             "uid": int(payload["uid"]),
             "enc_id": enc_id,
             "sub_id": sub_id,
@@ -305,6 +512,30 @@ def criar_solicitacao_operacao(
     sol_id = db.execute(text("SELECT LAST_INSERT_ID()")).scalar()
     db.commit()
     return {"ok": True, "solicitacao_id": sol_id}
+
+
+@router.get("/operacao/minhas", dependencies=[Depends(require_roles(["admin", "funcionario"]))])
+def listar_operacoes_minhas(
+    status: Optional[str] = Query(default=None),
+    db: Session = Depends(get_db),
+    payload: dict = Depends(get_current_token),
+):
+    ensure_operacoes_table(db)
+    uid = int(payload["uid"])
+    rows = db.execute(
+        text(
+            """
+            SELECT id, tipo, kit_id, item_id, status, criado_em
+            FROM solicitacoes_operacao
+            WHERE solicitante_user_id = :uid
+              AND (:status IS NULL OR status = :status)
+            ORDER BY id DESC
+            LIMIT 200
+            """
+        ),
+        {"uid": uid, "status": status},
+    ).mappings().all()
+    return {"items": rows}
 
 
 @router.get("/operacao/admin", dependencies=[Depends(require_roles(["admin"]))])
@@ -387,35 +618,53 @@ def concluir_operacao(
 
     tipo = (op["tipo"] or "").upper()
     if tipo == "SUBSTITUICAO_ITEM":
+        ensure_movimentos_columns(db)
+        ensure_itens_columns(db)
         if not body.item_substituto_id:
             raise HTTPException(status_code=400, detail="item_substituto_id obrigatorio")
 
         original = db.execute(
-            text("SELECT id, descricao FROM itens WHERE id = :id"),
+            text("SELECT id, patrimonio, descricao, descricao_canonica, classe_tipo FROM itens WHERE id = :id"),
             {"id": op["item_id"]},
         ).mappings().first()
         substituto = db.execute(
-            text("SELECT id, descricao FROM itens WHERE id = :id"),
+            text(
+                """
+                SELECT i.id, i.patrimonio, i.descricao, i.descricao_canonica, i.classe_tipo,
+                       i.ativo, i.disponivel, ki.item_id AS kit_item_id
+                FROM itens i
+                LEFT JOIN kit_itens ki ON ki.item_id = i.id
+                WHERE i.id = :id
+                """
+            ),
             {"id": body.item_substituto_id},
         ).mappings().first()
         if not original or not substituto:
             raise HTTPException(status_code=404, detail="Item original/substituto nao encontrado")
 
-        if (original["descricao"] or "").strip() != (substituto["descricao"] or "").strip():
-            raise HTTPException(status_code=400, detail="Substituto deve ter o mesmo modelo/descricao")
+        if not (original.get("classe_tipo") or "").strip():
+            raise HTTPException(status_code=400, detail="Item original sem classe_tipo cadastrada")
+        if not (substituto.get("classe_tipo") or "").strip():
+            raise HTTPException(status_code=400, detail="Substituto sem classe_tipo cadastrada")
+        if (original["classe_tipo"] or "").strip() != (substituto["classe_tipo"] or "").strip():
+            raise HTTPException(status_code=400, detail="Substituto deve ter a mesma classe_tipo")
+        orig_desc = (original.get("descricao_canonica") or "").strip()
+        sub_desc = (substituto.get("descricao_canonica") or "").strip()
+        if not orig_desc or not sub_desc:
+            raise HTTPException(status_code=400, detail="Item sem descricao_canonica cadastrada")
+        if orig_desc != sub_desc:
+            raise HTTPException(status_code=400, detail="Substituto deve ter a mesma descricao_canonica")
+        if int(substituto.get("ativo") or 0) != 1:
+            raise HTTPException(status_code=409, detail="SUBSTITUTO_NOT_AVAILABLE")
+        if int(substituto.get("disponivel") or 0) != 1:
+            raise HTTPException(status_code=409, detail="SUBSTITUTO_NOT_AVAILABLE")
+        if substituto.get("kit_item_id"):
+            raise HTTPException(status_code=409, detail="SUBSTITUTO_NOT_AVAILABLE")
 
-        res = db.execute(
-            text(
-                """
-                UPDATE kit_itens
-                SET item_id = :novo_item
-                WHERE kit_id = :kit_id AND item_id = :item_id
-                """
-            ),
-            {"novo_item": int(body.item_substituto_id), "kit_id": int(op["kit_id"]), "item_id": int(op["item_id"])},
+        db.execute(
+            text("UPDATE itens SET disponivel = 0 WHERE id = :id"),
+            {"id": int(body.item_substituto_id)},
         )
-        if res.rowcount == 0:
-            raise HTTPException(status_code=400, detail="Item nao encontrado no kit para substituicao")
 
         db.execute(
             text(
@@ -424,11 +673,76 @@ def concluir_operacao(
                 SET status = 'CONCLUIDA',
                     item_substituto_id = :sub_id,
                     admin_user_id = :uid,
-                    concluido_em = NOW()
+                    concluido_em = NOW(),
+                    pendente_key = NULL
                 WHERE id = :oid
                 """
             ),
             {"sub_id": int(body.item_substituto_id), "uid": int(payload["uid"]), "oid": operacao_id},
+        )
+        enc_id = op.get("encarregado_id") or op.get("solicitante_user_id")
+        obs_base = f"Substituicao: {original['patrimonio']} -> {substituto['patrimonio']}"
+        db.execute(
+            text(
+                """
+                INSERT INTO item_movimentos
+                  (data_hora, kit_id, encarregado_id, item_id, acao, subresponsavel_id,
+                   latitude, longitude, observacao, registrado_por_id, pin_tipo, pin_autor_id,
+                   termo_id, item_substituto_id)
+                VALUES
+                  (NOW(), :kit_id, :enc_id, :item_id, 'SUBSTITUIR', NULL,
+                   NULL, NULL, :obs, :reg_id, 'ADMIN_4', :pin_autor, NULL, :sub_item_id)
+                """
+            ),
+            {
+                "kit_id": op.get("kit_id"),
+                "enc_id": enc_id,
+                "item_id": original["id"],
+                "obs": obs_base,
+                "reg_id": int(payload["uid"]),
+                "pin_autor": int(payload["uid"]),
+                "sub_item_id": substituto["id"],
+            },
+        )
+        db.execute(
+            text(
+                """
+                INSERT INTO movimentos
+                  (tipo, kit_id, patrimonio, encarregado_id, subresponsavel_id, quantidade, observacao,
+                   registrado_por_id, pin_tipo, pin_autor_id, termo_id)
+                VALUES
+                  ('SUBSTITUIR', :kit_id, :pat, :enc_id, NULL, 1, :obs,
+                   :reg_id, 'ADMIN_4', :pin_autor, NULL)
+                """
+            ),
+            {
+                "kit_id": op.get("kit_id"),
+                "pat": original["patrimonio"],
+                "enc_id": enc_id,
+                "obs": obs_base,
+                "reg_id": int(payload["uid"]),
+                "pin_autor": int(payload["uid"]),
+            },
+        )
+        db.execute(
+            text(
+                """
+                INSERT INTO movimentos
+                  (tipo, kit_id, patrimonio, encarregado_id, subresponsavel_id, quantidade, observacao,
+                   registrado_por_id, pin_tipo, pin_autor_id, termo_id)
+                VALUES
+                  ('SUBSTITUIR_ENTRA', :kit_id, :pat, :enc_id, NULL, 1, :obs,
+                   :reg_id, 'ADMIN_4', :pin_autor, NULL)
+                """
+            ),
+            {
+                "kit_id": op.get("kit_id"),
+                "pat": substituto["patrimonio"],
+                "enc_id": enc_id,
+                "obs": f"Entrada por substituicao do {original['patrimonio']}",
+                "reg_id": int(payload["uid"]),
+                "pin_autor": int(payload["uid"]),
+            },
         )
     else:
         update = {
@@ -443,7 +757,8 @@ def concluir_operacao(
                 SET status = 'CONCLUIDA',
                     item_id = COALESCE(:item_id, item_id),
                     admin_user_id = :uid,
-                    concluido_em = NOW()
+                    concluido_em = NOW(),
+                    pendente_key = NULL
                 WHERE id = :oid
                 """
             ),

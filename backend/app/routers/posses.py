@@ -23,7 +23,7 @@ def kits_disponiveis(db: Session = Depends(get_db)):
             SELECT k.*
             FROM kits k
             LEFT JOIN posses p
-              ON p.tipo='KIT' AND p.kit_id=k.id AND p.is_ativa=1
+              ON p.tipo='KIT' AND p.kit_id=k.id AND p.status='ATIVA'
             WHERE p.id IS NULL
             ORDER BY k.id
             """
@@ -41,7 +41,7 @@ def meus_kits(encarregado_id: int = Query(...), db: Session = Depends(get_db)):
             FROM posses p
             JOIN kits k ON k.id = p.kit_id
             WHERE p.tipo='KIT'
-              AND p.is_ativa=1
+              AND p.status='ATIVA'
               AND p.encarregado_id=:enc
               AND COALESCE(p.status,'ATIVA') = 'ATIVA'
             ORDER BY k.id
@@ -61,7 +61,7 @@ def avulsos_disponiveis(db: Session = Depends(get_db)):
             FROM itens i
             LEFT JOIN kit_itens ki ON ki.item_id = i.id
             LEFT JOIN posses p
-              ON p.tipo='AVULSO' AND p.patrimonio=i.patrimonio AND p.is_ativa=1
+              ON p.tipo='AVULSO' AND p.patrimonio=i.patrimonio AND p.status='ATIVA'
             WHERE ki.item_id IS NULL
               AND i.ativo=1
               AND p.id IS NULL
@@ -81,7 +81,7 @@ def meus_avulsos(encarregado_id: int = Query(...), db: Session = Depends(get_db)
             FROM posses p
             JOIN itens i ON i.patrimonio = p.patrimonio
             WHERE p.tipo='AVULSO'
-              AND p.is_ativa=1
+              AND p.status='ATIVA'
               AND p.encarregado_id=:enc
               AND COALESCE(p.status,'ATIVA') = 'ATIVA'
             ORDER BY i.descricao

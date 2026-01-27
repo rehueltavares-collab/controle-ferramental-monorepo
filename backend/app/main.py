@@ -25,6 +25,7 @@ from .routers import (
     admin,
     avulsos,
     posses,
+    solicitacoes,
     solicitacoes_operacao,
     admin_solicitacoes_operacao,
     status_overview,
@@ -77,30 +78,11 @@ DEFAULT_CORS_ORIGINS = [
     "http://127.0.0.1:5173",
     "https://localhost:5173",
     "https://127.0.0.1:5173",
+    "https://api-ferramental.local:5173",
+    "http://api-ferramental.local:5173",
 ]
 
 origins = _parse_env_list("CORS_ORIGINS") or DEFAULT_CORS_ORIGINS
-
-cors_kwargs = dict(
-    allow_origins=origins,
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
-
-# DEV/LOCAL: libera LAN + domínios internos sem editar .env toda hora
-if ENV in ("dev", "local"):
-    cors_kwargs["allow_origin_regex"] = (
-        r"^https?://("
-        r"localhost|127\.0\.0\.1|"
-        r"192\.168\.\d{1,3}\.\d{1,3}|"
-        r"ferramental\.local|"
-        r"ferramental\.perfilx\.corp|"
-        r"ferramentas\.perfilx\.com\.br"
-        r")(:\d+)?$"
-    )
-
-app.add_middleware(CORSMiddleware, **cors_kwargs)
 
 DEFAULT_ALLOWED_HOSTS = [
     "localhost",
@@ -112,6 +94,17 @@ DEFAULT_ALLOWED_HOSTS = [
 
 allowed_hosts = _parse_env_list("ALLOWED_HOSTS") or DEFAULT_ALLOWED_HOSTS
 app.add_middleware(TrustedHostMiddleware, allowed_hosts=allowed_hosts)
+
+cors_kwargs = dict(
+    allow_origins=origins,
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+# Coloca CORS por último para garantir headers mesmo em respostas geradas
+# por middlewares internos (ex: TrustedHost).
+app.add_middleware(CORSMiddleware, **cors_kwargs)
 
 # ======================================================
 # DATABASE
@@ -138,6 +131,7 @@ app.include_router(manuais.router, tags=["Manuais"])
 app.include_router(admin.router, tags=["Admin"])
 app.include_router(avulsos.router, tags=["Avulsos"])
 app.include_router(posses.router)
+app.include_router(solicitacoes.router)
 app.include_router(solicitacoes_operacao.router)
 app.include_router(admin_solicitacoes_operacao.router)
 app.include_router(status_overview.router)
@@ -262,6 +256,42 @@ def listar_kits(
     if setor_id is not None:
         q = q.filter(models.Kit.setor_id == setor_id)
     return q.all()
+
+
+def ensure_kit_pendencias(db: Session) -> None:
+    db.execute(
+        text(
+            """
+            CREATE TABLE IF NOT EXISTS kit_pendencias (
+              id INT AUTO_INCREMENT PRIMARY KEY,
+              kit_id INT NOT NULL,
+              item_id INT NULL,
+              descricao_canonica VARCHAR(255) NULL,
+              motivo VARCHAR(50) NOT NULL,
+              observacao TEXT NULL,
+              status VARCHAR(20) NOT NULL DEFAULT 'ABERTA',
+              criado_em DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+              encerrado_em DATETIME NULL
+            )
+            """
+        )
+    )
+    db.commit()
+
+
+@app.get("/kits/pendencias")
+def listar_kits_pendencias(db: Session = Depends(get_db), _: dict = Depends(require_roles(["admin", "manutencao", "funcionario"]))):
+    ensure_kit_pendencias(db)
+    rows = db.execute(
+        text(
+            """
+            SELECT kit_id
+            FROM kit_pendencias
+            WHERE status = 'ABERTA'
+            """
+        )
+    ).mappings().all()
+    return {"kits": [r["kit_id"] for r in rows]}
 
 # ======================================================
 # KIT x ITENS
