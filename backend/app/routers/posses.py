@@ -24,7 +24,10 @@ def kits_disponiveis(db: Session = Depends(get_db)):
             FROM kits k
             LEFT JOIN posses p
               ON p.tipo='KIT' AND p.kit_id=k.id AND p.status='ATIVA'
+            LEFT JOIN kit_pendencias kp
+              ON kp.kit_id = k.id AND kp.status = 'ABERTA'
             WHERE p.id IS NULL
+              AND kp.id IS NULL
             ORDER BY k.id
             """
         )

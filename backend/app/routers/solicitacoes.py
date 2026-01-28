@@ -245,6 +245,14 @@ def ensure_kit_pendencias(db: Session) -> None:
               item_id INT NULL,
               descricao_canonica VARCHAR(255) NULL,
               motivo VARCHAR(50) NOT NULL,
+              bo_ref TEXT NULL,
+              termo_id INT NULL,
+              responsavel_tipo VARCHAR(20) NULL,
+              responsavel_id INT NULL,
+              resolucao_acao VARCHAR(30) NULL,
+              resolvido_por_item_id INT NULL,
+              resolvido_em DATETIME NULL,
+              resolvido_por_user_id INT NULL,
               observacao TEXT NULL,
               status VARCHAR(20) NOT NULL DEFAULT 'ABERTA',
               criado_em DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -253,6 +261,21 @@ def ensure_kit_pendencias(db: Session) -> None:
             """
         )
     )
+    columns = [
+        ("bo_ref", "TEXT NULL"),
+        ("termo_id", "INT NULL"),
+        ("responsavel_tipo", "VARCHAR(20) NULL"),
+        ("responsavel_id", "INT NULL"),
+        ("resolucao_acao", "VARCHAR(30) NULL"),
+        ("resolvido_por_item_id", "INT NULL"),
+        ("resolvido_em", "DATETIME NULL"),
+        ("resolvido_por_user_id", "INT NULL"),
+    ]
+    for column, col_type in columns:
+        try:
+            db.execute(text(f"ALTER TABLE kit_pendencias ADD COLUMN {column} {col_type}"))
+        except Exception:
+            pass
     db.commit()
 
 
@@ -288,6 +311,11 @@ class ConcluirOperacaoIn(BaseModel):
     item_id: Optional[int] = None
     item_substituto_id: Optional[int] = None
     admin_pin: Optional[str] = None
+    motivo: Optional[str] = None
+    bo_ref: Optional[str] = None
+    termo_id: Optional[int] = None
+    responsavel_tipo: Optional[str] = None
+    responsavel_id: Optional[int] = None
 
 
 class AdminPinIn(BaseModel):
@@ -622,6 +650,24 @@ def concluir_operacao(
         ensure_itens_columns(db)
         if not body.item_substituto_id:
             raise HTTPException(status_code=400, detail="item_substituto_id obrigatorio")
+        motivo = (body.motivo or "").strip().upper()
+        bo_ref = (body.bo_ref or "").strip()
+        termo_id = int(body.termo_id) if body.termo_id else None
+        resp_tipo = (body.responsavel_tipo or "").strip().upper()
+        resp_id = int(body.responsavel_id) if body.responsavel_id else None
+
+        if motivo not in ("PERDA", "FURTO", "MANUTENCAO"):
+            raise HTTPException(status_code=400, detail="motivo invalido (PERDA/FURTO/MANUTENCAO)")
+        if motivo == "FURTO" and not bo_ref:
+            raise HTTPException(status_code=400, detail="bo_ref obrigatorio para FURTO")
+        if motivo == "PERDA":
+            if resp_tipo not in ("USER", "SUBRESP"):
+                raise HTTPException(status_code=400, detail="responsavel_tipo invalido (USER/SUBRESP)")
+            if not resp_id or not termo_id:
+                raise HTTPException(
+                    status_code=400,
+                    detail="responsavel_id e termo_id obrigatorios para PERDA",
+                )
 
         original = db.execute(
             text("SELECT id, patrimonio, descricao, descricao_canonica, classe_tipo FROM itens WHERE id = :id"),
@@ -642,17 +688,13 @@ def concluir_operacao(
         if not original or not substituto:
             raise HTTPException(status_code=404, detail="Item original/substituto nao encontrado")
 
-        if not (original.get("classe_tipo") or "").strip():
-            raise HTTPException(status_code=400, detail="Item original sem classe_tipo cadastrada")
-        if not (substituto.get("classe_tipo") or "").strip():
-            raise HTTPException(status_code=400, detail="Substituto sem classe_tipo cadastrada")
-        if (original["classe_tipo"] or "").strip() != (substituto["classe_tipo"] or "").strip():
-            raise HTTPException(status_code=400, detail="Substituto deve ter a mesma classe_tipo")
-        orig_desc = (original.get("descricao_canonica") or "").strip()
-        sub_desc = (substituto.get("descricao_canonica") or "").strip()
-        if not orig_desc or not sub_desc:
-            raise HTTPException(status_code=400, detail="Item sem descricao_canonica cadastrada")
-        if orig_desc != sub_desc:
+        orig_desc = (original.get("descricao_canonica") or "").strip() or normalize_desc(
+            original.get("descricao") or ""
+        )
+        sub_desc = (substituto.get("descricao_canonica") or "").strip() or normalize_desc(
+            substituto.get("descricao") or ""
+        )
+        if orig_desc and sub_desc and orig_desc != sub_desc:
             raise HTTPException(status_code=400, detail="Substituto deve ter a mesma descricao_canonica")
         if int(substituto.get("ativo") or 0) != 1:
             raise HTTPException(status_code=409, detail="SUBSTITUTO_NOT_AVAILABLE")
@@ -661,10 +703,36 @@ def concluir_operacao(
         if substituto.get("kit_item_id"):
             raise HTTPException(status_code=409, detail="SUBSTITUTO_NOT_AVAILABLE")
 
+        # Atualiza composicao do kit: sai original, entra substituto
+        if op.get("kit_id"):
+            db.execute(
+                text("DELETE FROM kit_itens WHERE kit_id = :kit_id AND item_id = :item_id"),
+                {"kit_id": int(op.get("kit_id")), "item_id": int(original["id"])},
+            )
+            existing = db.execute(
+                text("SELECT id FROM kit_itens WHERE kit_id = :kit_id AND item_id = :item_id LIMIT 1"),
+                {"kit_id": int(op.get("kit_id")), "item_id": int(substituto["id"])},
+            ).first()
+            if not existing:
+                db.execute(
+                    text("INSERT INTO kit_itens (kit_id, item_id, quantidade) VALUES (:kit_id, :item_id, 1)"),
+                    {"kit_id": int(op.get("kit_id")), "item_id": int(substituto["id"])},
+                )
+
         db.execute(
             text("UPDATE itens SET disponivel = 0 WHERE id = :id"),
             {"id": int(body.item_substituto_id)},
         )
+        db.execute(
+            text("UPDATE itens SET disponivel = 1 WHERE id = :id"),
+            {"id": int(original["id"])},
+        )
+
+        obs_extra = f"motivo={motivo}"
+        if motivo == "FURTO":
+            obs_extra += f" | bo_ref={bo_ref}"
+        if motivo == "PERDA":
+            obs_extra += f" | termo_id={termo_id} | responsavel={resp_tipo}:{resp_id}"
 
         db.execute(
             text(
@@ -672,16 +740,24 @@ def concluir_operacao(
                 UPDATE solicitacoes_operacao
                 SET status = 'CONCLUIDA',
                     item_substituto_id = :sub_id,
+                    motivo = :motivo,
+                    observacao = :obs,
                     admin_user_id = :uid,
                     concluido_em = NOW(),
                     pendente_key = NULL
                 WHERE id = :oid
                 """
             ),
-            {"sub_id": int(body.item_substituto_id), "uid": int(payload["uid"]), "oid": operacao_id},
+            {
+                "sub_id": int(body.item_substituto_id),
+                "uid": int(payload["uid"]),
+                "oid": operacao_id,
+                "motivo": motivo,
+                "obs": obs_extra,
+            },
         )
         enc_id = op.get("encarregado_id") or op.get("solicitante_user_id")
-        obs_base = f"Substituicao: {original['patrimonio']} -> {substituto['patrimonio']}"
+        obs_base = f"Substituicao: {original['patrimonio']} -> {substituto['patrimonio']} | {obs_extra}"
         db.execute(
             text(
                 """
@@ -910,7 +986,7 @@ def detalhe_solicitacao(
             text(
                 """
                 SELECT si.id AS solicitacao_item_id, si.item_id, si.quantidade_solicitada,
-                       si.quantidade_entregue, si.status, i.patrimonio, i.descricao
+                       si.quantidade_entregue, si.status, i.patrimonio, i.descricao, i.descricao_canonica
                 FROM solicitacao_itens si
                 JOIN itens i ON i.id = si.item_id
                 WHERE si.solicitacao_id = :sid

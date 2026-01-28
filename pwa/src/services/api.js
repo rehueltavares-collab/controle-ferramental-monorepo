@@ -14,6 +14,18 @@ function authHeaders() {
   return token ? { Authorization: `Bearer ${token}` } : {};
 }
 
+function clearStoredToken() {
+  localStorage.removeItem("token");
+  localStorage.removeItem("access_token");
+  localStorage.removeItem("auth_token");
+  localStorage.removeItem("jwt");
+}
+
+function handleUnauthorized() {
+  clearStoredToken();
+  window.dispatchEvent(new CustomEvent("auth:expired"));
+}
+
 function norm(path) {
   if (!path.startsWith("/")) path = `/${path}`;
   return path;
@@ -23,6 +35,9 @@ export async function apiGet(path) {
   const p = norm(path);
   const url = `${BASE}${p}`;
   const res = await fetch(url, { headers: { ...authHeaders() } });
+  if (res.status === 401) {
+    handleUnauthorized();
+  }
   if (!res.ok) {
     console.error("apiGet failed", { url, status: res.status });
     throw new Error(`GET ${url} -> ${res.status}`);
@@ -38,10 +53,20 @@ export async function apiPost(path, body) {
     headers: { "Content-Type": "application/json", ...authHeaders() },
     body: JSON.stringify(body),
   });
+  if (res.status === 401) {
+    handleUnauthorized();
+  }
   if (!res.ok) {
     const t = await res.text().catch(() => "");
+    let detail = "";
+    try {
+      const j = t ? JSON.parse(t) : null;
+      detail = j?.detail || j?.message || "";
+    } catch {
+      detail = "";
+    }
     console.error("apiPost failed", { url, status: res.status });
-    throw new Error(`POST ${url} -> ${res.status} ${t}`);
+    throw new Error(detail || `POST ${url} -> ${res.status} ${t}`);
   }
   return res.json();
 }
@@ -174,10 +199,18 @@ export async function adminOperacaoConferirEntrega(operacaoId, payload) {
   return apiPost(`/admin/solicitacoes/operacao/${operacaoId}/conferir-entrega`, payload);
 }
 
-export async function adminOperacaoAprovarSubstituicao(operacaoId, adminPin, substitutoItemId) {
+export async function adminOperacaoAprovarSubstituicao(operacaoId, adminPin, substitutoItemId, extra = {}) {
   return apiPost(`/admin/solicitacoes/operacao/${operacaoId}/aprovar-substituicao`, {
     admin_pin: adminPin,
     substituto_item_id: substitutoItemId,
+    ...extra,
+  });
+}
+
+export async function adminOperacaoRecusarSubstituicao(operacaoId, adminPin, motivo = "") {
+  return apiPost(`/admin/solicitacoes/operacao/${operacaoId}/recusar-substituicao`, {
+    admin_pin: adminPin,
+    motivo,
   });
 }
 
@@ -198,9 +231,10 @@ export async function adminAvulsosDisponiveis({ classeTipo = "", query = "" } = 
   return apiGet(`/admin/avulsos/disponiveis?${params.toString()}`);
 }
 
-export async function adminSubstituicaoCandidatos({ descricaoCanonica = "", kitId = "" } = {}) {
+export async function adminSubstituicaoCandidatos({ descricaoCanonica = "", descricao = "", kitId = "" } = {}) {
   const params = new URLSearchParams();
   if (descricaoCanonica) params.set("descricao_canonica", descricaoCanonica);
+  if (descricao) params.set("descricao", descricao);
   if (kitId) params.set("kit_id", String(kitId));
   return apiGet(`/admin/substituicao/candidatos?${params.toString()}`);
 }
@@ -247,6 +281,6 @@ export async function adminListarPendenciasKits() {
   return apiGet(`/admin/kits/pendencias`);
 }
 
-export async function adminResolverPendenciaKit(pendenciaId) {
-  return apiPost(`/admin/kits/pendencias/${pendenciaId}/resolver`, {});
+export async function adminResolverPendenciaKit(pendenciaId, payload) {
+  return apiPost(`/admin/kits/pendencias/${pendenciaId}/resolver`, payload || {});
 }

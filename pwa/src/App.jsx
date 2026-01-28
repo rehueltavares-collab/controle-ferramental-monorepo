@@ -23,6 +23,7 @@ import {
   adminOperacaoConcluirEntrega,
   adminOperacaoConferirEntrega,
   adminOperacaoAprovarSubstituicao,
+  adminOperacaoRecusarSubstituicao,
   adminOperacaoConfirmarDevolucao,
   adminOperacaoConferirDevolucao,
   adminAvulsosDisponiveis,
@@ -272,17 +273,17 @@ function SubresponsavelPicker({
     const itemRef = `${patrimonio}${descricao ? ` - ${descricao}` : ""}`;
     const subRef = (valueText ?? "").trim();
     const parts = [
-      "TERMO DE RESPONSABILIDADE - RETIRADA E CUSTODIA DE FERRAMENTAS/KIT",
-      "Declaro que recebi da empresa o(s) item(ns)/kit(s) identificado(s) no sistema (patrimonio, descricao e/ou ID), comprometendo-me a:",
-      "1) Zelar, guardar e utilizar corretamente os bens, mantendo-os sob minha custodia enquanto estiverem sob minha responsabilidade.",
-      "2) Nao ceder, transferir ou subdividir a posse sem registro no sistema, quando aplicavel (incluindo distribuicao por PIN e subresponsaveis).",
-      "3) Comunicar imediatamente ocorrencia de extravio, dano, roubo/furto, sinistro ou qualquer irregularidade, permitindo a apuracao interna.",
-      "4) Reconheco que, havendo comprovacao de conduta dolosa ou culposa e do nexo com o prejuizo, podera haver responsabilizacao civil e/ou medidas cabiveis, com eventual ressarcimento na forma da lei, observadas as regras trabalhistas aplicaveis e o devido processo de apuracao.",
-      "5) Autorizo o registro, para fins de seguranca, auditoria e rastreabilidade, de data/hora, identificacao do usuario, IP, user-agent e, quando disponivel, geolocalizacao, limitado a finalidade de controle patrimonial e prevencao de perdas.",
+      "TERMO DE RESPONSABILIDADE – RETIRADA E CUSTÓDIA DE KIT",
+      "Declaro que recebi da empresa o kit identificado no sistema, comprometendo-me a:",
+      "1) Zelar, guardar e utilizar corretamente os bens que compõem o kit, mantendo-os sob minha custódia enquanto estiverem sob minha responsabilidade.",
+      "2) Não ceder, transferir, emprestar ou subdividir a posse do kit ou de quaisquer de seus itens sem o devido registro e autorização no sistema.",
+      "3) Comunicar imediatamente qualquer ocorrência de extravio, dano, roubo, furto, sinistro ou irregularidade, permitindo a apuração interna e a adoção das medidas cabíveis.",
+      "4) Reconheço que, havendo comprovação de conduta dolosa ou culposa e do nexo de causalidade com eventual prejuízo, poderei ser responsabilizado civilmente e/ou submetido às medidas cabíveis, inclusive ressarcimento, na forma da lei, observadas as normas trabalhistas aplicáveis e o devido processo de apuração.",
+      "5) Autorizo o registro, para fins de segurança, auditoria e rastreabilidade, de informações como data e hora, identificação do usuário, endereço IP, user-agent e, quando disponível, dados de geolocalização, estritamente limitados à finalidade de controle patrimonial e prevenção de perdas.",
+      "6) Autorizo, quando cabível e observado o devido processo de apuração e a legislação vigente, eventual desconto ou ressarcimento relacionado a perdas e danos comprovados, nos termos da lei.",
       "",
       `KIT: ${kitRef}`,
-      `ITEM: ${itemRef}`,
-      subRef ? `SUBRESPONSAVEL: ${subRef}` : "",
+      subRef ? `SUBRESPONSÁVEL (quando aplicável): ${subRef}` : "",
       `DATA/HORA: ${new Date().toLocaleString()}`,
     ].filter(Boolean);
     return parts.join("\n");
@@ -809,6 +810,146 @@ function SubresponsavelPicker({
   );
 }
 
+function ResponsavelPicker({ valueText, selectedId, selectedTipo, onPick, disabled }) {
+  const [typing, setTyping] = useState(valueText ?? "");
+  const [options, setOptions] = useState([]);
+  const [loading, setLoading] = useState(false);
+  const [open, setOpen] = useState(false);
+  const [msg, setMsg] = useState("");
+  const lastQueryRef = useRef("");
+  const debounceRef = useRef(null);
+
+  useEffect(() => {
+    setTyping(valueText ?? "");
+  }, [valueText]);
+
+  useEffect(() => {
+    const q = (typing ?? "").trim();
+    setMsg("");
+
+    if (debounceRef.current) clearTimeout(debounceRef.current);
+
+    if (!q) {
+      setOptions([]);
+      setOpen(false);
+      return;
+    }
+
+    debounceRef.current = setTimeout(async () => {
+      try {
+        setLoading(true);
+        lastQueryRef.current = q;
+        const [usersRes, subsRes] = await Promise.all([
+          adminListUsuarios(q),
+          searchSubresponsaveis(q),
+        ]);
+        if (lastQueryRef.current !== q) return;
+        const users = safeArray(usersRes?.items).map((u) => ({
+          tipo: "USER",
+          id: u.id,
+          label: `${u.nome || u.username || "Usuario"}${u.username ? ` (@${u.username})` : ""}`,
+        }));
+        const subs = safeArray(subsRes).map((s) => ({
+          tipo: "SUBRESP",
+          id: s.id,
+          label: s.nome || `Subresponsavel ${s.id}`,
+        }));
+        setOptions([...users, ...subs]);
+        setOpen(true);
+      } catch (e) {
+        setOptions([]);
+        setOpen(false);
+        setMsg(e?.message ?? "Falha ao buscar responsáveis");
+      } finally {
+        setLoading(false);
+      }
+    }, 250);
+
+    return () => {
+      if (debounceRef.current) clearTimeout(debounceRef.current);
+    };
+  }, [typing]);
+
+  function handlePick(opt) {
+    setTyping(opt.label || "");
+    setOpen(false);
+    setOptions([]);
+    onPick?.(opt);
+  }
+
+  return (
+    <div style={{ position: "relative", width: "100%" }}>
+      <input
+        style={{ width: "100%", padding: 6 }}
+        placeholder="Responsável (digite para buscar)"
+        value={typing}
+        disabled={disabled}
+        onChange={(e) => {
+          setTyping(e.target.value);
+          setOpen(true);
+        }}
+        onFocus={() => {
+          if (options.length) setOpen(true);
+        }}
+        onBlur={() => {
+          setTimeout(() => setOpen(false), 150);
+        }}
+      />
+
+      {open && options.length > 0 ? (
+        <div
+          style={{
+            position: "absolute",
+            top: 34,
+            left: 0,
+            width: "100%",
+            background: "#fff",
+            color: "#111",
+            border: "1px solid #ccc",
+            borderRadius: 8,
+            overflow: "hidden",
+            zIndex: 9999,
+            boxShadow: "0 10px 30px rgba(0,0,0,.25)",
+            maxHeight: 220,
+            overflowY: "auto",
+          }}
+        >
+          {options.map((opt) => (
+            <div
+              key={`${opt.tipo}-${opt.id}`}
+              onMouseDown={(e) => e.preventDefault()}
+              onClick={() => handlePick(opt)}
+              style={{
+                padding: "8px 10px",
+                cursor: "pointer",
+                borderTop: "1px solid #eee",
+                fontSize: 12,
+                display: "flex",
+                justifyContent: "space-between",
+                gap: 10,
+              }}
+            >
+              <span style={{ fontWeight: 700 }}>{opt.label}</span>
+              <span style={{ opacity: 0.6 }}>{opt.tipo}</span>
+            </div>
+          ))}
+        </div>
+      ) : null}
+
+      <div style={{ marginTop: 4, fontSize: 11, opacity: 0.75 }}>
+        {loading ? "Buscando..." : null}
+        {msg ? <span style={{ marginLeft: 8, color: "#b00020" }}>{msg}</span> : null}
+      </div>
+
+      {selectedId && selectedTipo ? (
+        <div style={{ marginTop: 4, fontSize: 11, opacity: 0.7 }}>
+          Selecionado: {selectedTipo}:{selectedId}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
 
 /**
  * =========================================================
@@ -868,6 +1009,7 @@ function SolicitacoesCard({
   selectedKitId,
   statusOverview,
   statusOverviewErr,
+  pendingSubstituicoesAll,
 }) {
   const pendentes = useMemo(() => {
     if (!selectedKitId) return [];
@@ -885,7 +1027,15 @@ function SolicitacoesCard({
         <div style={{ display: "flex", gap: 8, flexWrap: "wrap", justifyContent: "flex-end" }}>
           <Pill label="Presente" value={statusOverview?.present ?? "-"} />
           <Pill label="Distribuído" value={statusOverview?.distributed ?? "-"} />
-          <Pill label="Pend. Substituição" value={statusOverview?.pending_substituicao ?? "-"} />
+          <Pill
+            label="Pend. Substituição"
+            value={
+              Math.max(
+                Number(statusOverview?.pending_substituicao ?? 0),
+                pendingSubstituicoesAll?.size ?? 0
+              ) || "-"
+            }
+          />
           <Pill label="Transição (local)" value={getTransitSet().size} />
         </div>
       }
@@ -1109,14 +1259,33 @@ function DetalhesKitCard({
                     ) : null}
                     <button
                       type="button"
-                      onClick={() => onSolicitarSubstituicao?.(x)}
-                      disabled={
-                        !selectedKitId ||
-                        hasPendingSubst ||
-                        isSyncPending ||
-                        hasPendingDev ||
-                        isKitTransit
-                      }
+                      onMouseDown={() => {
+                        console.log("CLICK solicitar substituicao (mousedown)");
+                        toast("Clique detectado: solicitar substituição");
+                      }}
+                      onClick={() => {
+                        if (!selectedKitId) {
+                          toast("Selecione um kit.");
+                          return;
+                        }
+                        if (hasPendingSubst) {
+                          toast("Substituição pendente neste item.");
+                          return;
+                        }
+                        if (isSyncPending) {
+                          toast("Item com sincronização pendente.");
+                          return;
+                        }
+                        if (hasPendingDev) {
+                          toast("Devolução pendente.");
+                          return;
+                        }
+                        if (isKitTransit) {
+                          toast("Kit em transição.");
+                          return;
+                        }
+                        onSolicitarSubstituicao?.(x, selectedKitId);
+                      }}
                       style={{
                         padding: "8px 10px",
                         borderRadius: 10,
@@ -1124,7 +1293,23 @@ function DetalhesKitCard({
                         background: "#fff",
                         cursor: "pointer",
                         fontWeight: 900,
+                        position: "relative",
+                        zIndex: 2,
+                        pointerEvents: "auto",
                       }}
+                      title={
+                        !selectedKitId
+                          ? "Selecione um kit"
+                          : hasPendingSubst
+                            ? "Substituição pendente"
+                            : isSyncPending
+                              ? "Pendente de sincronização"
+                              : hasPendingDev
+                                ? "Devolução pendente"
+                                : isKitTransit
+                                  ? "Kit em transição"
+                                  : "Solicitar substituição"
+                      }
                     >
                       {hasPendingSubst
                         ? "Substituição pendente"
@@ -1132,6 +1317,19 @@ function DetalhesKitCard({
                           ? "Pend. Sync"
                           : "Solicitar substituição"}
                     </button>
+                    {!selectedKitId || hasPendingSubst || isSyncPending || hasPendingDev || isKitTransit ? (
+                      <div style={{ fontSize: 11, opacity: 0.7 }}>
+                        {!selectedKitId
+                          ? "Selecione um kit."
+                          : hasPendingSubst
+                            ? "Substituição pendente neste item."
+                            : isSyncPending
+                              ? "Item com sincronização pendente."
+                              : hasPendingDev
+                                ? "Devolução pendente."
+                                : "Kit em transição."}
+                      </div>
+                    ) : null}
 
                     {isDistribuidoOk ? (
                       <button
@@ -1312,9 +1510,7 @@ export default function App() {
   const [checklistAssinatura, setChecklistAssinatura] = useState("");
   const [checklistTermoMsg, setChecklistTermoMsg] = useState("");
   const [checklistTermoSubmitting, setChecklistTermoSubmitting] = useState(false);
-  const [substModalItem, setSubstModalItem] = useState(null);
   const [substSubmitting, setSubstSubmitting] = useState(false);
-  const [substObservacao, setSubstObservacao] = useState("");
   const [previewSelecionado, setPreviewSelecionado] = useState(null);
   const [posseSelecionada, setPosseSelecionada] = useState(null);
   const [tabMeus, setTabMeus] = useState("kits");
@@ -1373,6 +1569,7 @@ export default function App() {
   const [pendingDevolucaoKits, setPendingDevolucaoKits] = useState(() => new Set());
   const [pendingDevolucaoAvulsos, setPendingDevolucaoAvulsos] = useState(() => new Set());
   const [pendingSubstituicoes, setPendingSubstituicoes] = useState(() => new Set());
+  const [pendingSubstituicoesLocal, setPendingSubstituicoesLocal] = useState(() => new Set());
   const [pendingOps, setPendingOps] = useState(() => getPendingOps());
   /**
    * GPS / Geolocalização
@@ -1539,6 +1736,11 @@ export default function App() {
       next.add(String(id));
       return next;
     });
+    setPendingSubstituicoesLocal((prev) => {
+      const next = new Set(prev);
+      next.add(String(id));
+      return next;
+    });
   };
 
   const updatePendingOps = useCallback((updater) => {
@@ -1614,6 +1816,14 @@ export default function App() {
       setPendingDevolucaoKits(nextKits);
       setPendingDevolucaoAvulsos(nextAvulsos);
       setPendingSubstituicoes(nextSubst);
+      setPendingSubstituicoesLocal((prev) => {
+        if (!prev.size) return prev;
+        const next = new Set();
+        for (const id of prev) {
+          if (nextSubst.has(String(id))) next.add(String(id));
+        }
+        return next;
+      });
     } catch (e) {
       console.warn("Falha ao carregar pendencias:", e);
     }
@@ -1694,10 +1904,31 @@ export default function App() {
   const [adminSubstitutosDisponiveis, setAdminSubstitutosDisponiveis] = useState([]);
   const [adminSubstitutosLoading, setAdminSubstitutosLoading] = useState(false);
   const [adminSubstitutosKits, setAdminSubstitutosKits] = useState([]);
+  const [adminSubstMotivo, setAdminSubstMotivo] = useState("");
+  const [adminSubstBoRef, setAdminSubstBoRef] = useState("");
+  const [adminSubstRespTipo, setAdminSubstRespTipo] = useState("");
+  const [adminSubstRespId, setAdminSubstRespId] = useState("");
+  const [adminSubstRespLabel, setAdminSubstRespLabel] = useState("");
+  const [adminSubstTermoId, setAdminSubstTermoId] = useState("");
+  const [adminSubstTermoOpen, setAdminSubstTermoOpen] = useState(false);
+  const [adminSubstTermoMsg, setAdminSubstTermoMsg] = useState("");
+  const [adminSubstTermoAssinatura, setAdminSubstTermoAssinatura] = useState("");
   const [adminEntregaItens, setAdminEntregaItens] = useState([]);
   const [adminEntregaPinAdmin, setAdminEntregaPinAdmin] = useState("");
   const [adminDevolucaoItens, setAdminDevolucaoItens] = useState([]);
   const [adminDevolucaoPinAdmin, setAdminDevolucaoPinAdmin] = useState("");
+  const [adminTermoPerdaOpen, setAdminTermoPerdaOpen] = useState(false);
+  const [adminTermoPerdaItem, setAdminTermoPerdaItem] = useState(null);
+  const [adminTermoPerdaAssinatura, setAdminTermoPerdaAssinatura] = useState("");
+  const [adminTermoPerdaMsg, setAdminTermoPerdaMsg] = useState("");
+  const [adminTermoPerdaSubmitting, setAdminTermoPerdaSubmitting] = useState(false);
+  const [adminPendenciaOpen, setAdminPendenciaOpen] = useState(false);
+  const [adminPendenciaSel, setAdminPendenciaSel] = useState(null);
+  const [adminPendenciaAction, setAdminPendenciaAction] = useState("");
+  const [adminPendenciaSubstitutoId, setAdminPendenciaSubstitutoId] = useState("");
+  const [adminPendenciaSubstitutos, setAdminPendenciaSubstitutos] = useState([]);
+  const [adminPendenciaSubstitutosLoading, setAdminPendenciaSubstitutosLoading] = useState(false);
+  const [adminPendenciaMsg, setAdminPendenciaMsg] = useState("");
   const [adminTermoOpen, setAdminTermoOpen] = useState(false);
   const [adminTermoTexto, setAdminTermoTexto] = useState("");
   const [adminTermoMeta, setAdminTermoMeta] = useState(null);
@@ -1778,6 +2009,64 @@ export default function App() {
     null;
   const adminDescricaoCanonica = (adminOpDetail?.contexto?.item_original?.descricao_canonica || "").trim();
   const adminSubstBloqueada = adminOpDetail?.tipo === "SUBSTITUICAO" && !adminDescricaoCanonica;
+  const adminDevolucaoInvalid = useMemo(
+    () =>
+      adminDevolucaoItens.some((it) => {
+        const st = (it.status || "").toUpperCase();
+        if (st !== "AUSENTE") return false;
+        const motivo = (it.motivo || "").toUpperCase();
+        if (!motivo) return true;
+        if (motivo === "FURTO") return !(it.bo_ref || "").trim();
+        if (motivo === "PERDA") return !(it.responsavel_tipo && it.responsavel_id && it.termo_id);
+        return true;
+      }),
+    [adminDevolucaoItens]
+  );
+  const adminEntregaInvalid = useMemo(
+    () =>
+      adminEntregaItens.some((it) => {
+        const st = (it.status || "").toUpperCase();
+        if (st !== "AUSENTE") return false;
+        return !it.item_substituto_id;
+      }),
+    [adminEntregaItens]
+  );
+  const pendingSubstituicoesAll = useMemo(() => {
+    const next = new Set();
+    for (const id of pendingSubstituicoes) next.add(String(id));
+    for (const id of pendingSubstituicoesLocal) next.add(String(id));
+    return next;
+  }, [pendingSubstituicoes, pendingSubstituicoesLocal]);
+  const adminSubstInvalid = useMemo(() => {
+    if (!adminSubstMotivo) return true;
+    if (!adminSubstitutoId) return true;
+    if (adminSubstMotivo === "FURTO" && !adminSubstBoRef.trim()) return true;
+    if (adminSubstMotivo === "PERDA") {
+      if (!adminSubstRespTipo || !adminSubstRespId) return true;
+      if (!adminSubstTermoId) return true;
+    }
+    return false;
+  }, [
+    adminSubstMotivo,
+    adminSubstitutoId,
+    adminSubstBoRef,
+    adminSubstRespTipo,
+    adminSubstRespId,
+    adminSubstTermoId,
+  ]);
+
+  function buildTermoPerdaTexto({ kitRef = "", itemRef = "", responsavelRef = "" } = {}) {
+    const parts = [
+      "TERMO DE PERDA / DESCONTO",
+      "Declaro a perda do item vinculado ao kit do sistema e aceito as medidas cabiveis.",
+      "",
+      `KIT: ${kitRef}`,
+      itemRef ? `ITEM: ${itemRef}` : "",
+      responsavelRef ? `RESPONSAVEL: ${responsavelRef}` : "",
+      `DATA/HORA: ${new Date().toLocaleString()}`,
+    ].filter(Boolean);
+    return parts.join("\n");
+  }
 
   const loadAdminQueues = useCallback(async () => {
     setAdminQueuesLoading(true);
@@ -1808,6 +2097,14 @@ export default function App() {
     setAdminSubstitutoId("");
     setAdminSubstitutosDisponiveis([]);
     setAdminSubstitutosKits([]);
+    setAdminSubstMotivo("");
+    setAdminSubstBoRef("");
+    setAdminSubstRespTipo("");
+    setAdminSubstRespId("");
+    setAdminSubstRespLabel("");
+    setAdminSubstTermoId("");
+    setAdminSubstTermoMsg("");
+    setAdminSubstTermoAssinatura("");
     setAdminEntregaItens([]);
     setAdminEntregaPinAdmin("");
     setAdminDevolucaoItens([]);
@@ -1823,6 +2120,7 @@ export default function App() {
           try {
             const listRes = await adminSubstituicaoCandidatos({
               descricaoCanonica: canon,
+              descricao: res?.contexto?.item_original?.descricao || "",
               kitId: res?.contexto?.kit?.id,
             });
             setAdminSubstitutosDisponiveis(safeArray(listRes?.avulsos));
@@ -1840,10 +2138,11 @@ export default function App() {
           solicitacao_item_id: it.solicitacao_item_id || it.id,
           patrimonio: it.patrimonio,
           descricao: it.descricao,
+          descricao_canonica: it.descricao_canonica || "",
           status: "PRESENTE",
-          acao: "PENDENCIA",
-          motivo: "",
-          observacao: "",
+          item_substituto_id: "",
+          substitutos: [],
+          substitutos_loading: false,
         }));
         setAdminEntregaItens(itens);
       }
@@ -1854,7 +2153,11 @@ export default function App() {
           descricao: it.descricao,
           status: "PRESENTE",
           motivo: "",
-          anexo_path: "",
+          bo_ref: "",
+          termo_id: "",
+          responsavel_tipo: "",
+          responsavel_id: "",
+          responsavel_label: "",
         }));
         setAdminDevolucaoItens(itens);
       }
@@ -1912,11 +2215,37 @@ export default function App() {
       toast("Informe o ID do item substituto.");
       return;
     }
+    if (!adminSubstMotivo) {
+      toast("Selecione o motivo da substituição.");
+      return;
+    }
+    if (adminSubstMotivo === "FURTO" && !adminSubstBoRef.trim()) {
+      toast("Informe a referência do BO.");
+      return;
+    }
+    if (adminSubstMotivo === "PERDA") {
+      if (!adminSubstRespTipo || !adminSubstRespId) {
+        toast("Selecione o responsável.");
+        return;
+      }
+      if (!adminSubstTermoId) {
+        toast("Gere o termo de perda.");
+        return;
+      }
+    }
     setAdminOpActionLoading(true);
     try {
-      await adminOperacaoAprovarSubstituicao(id, String(pin).trim(), subId);
+      await adminOperacaoAprovarSubstituicao(id, String(pin).trim(), subId, {
+        motivo: adminSubstMotivo,
+        bo_ref: adminSubstBoRef.trim() || null,
+        termo_id: adminSubstTermoId ? Number(adminSubstTermoId) : null,
+        responsavel_tipo: adminSubstRespTipo || null,
+        responsavel_id: adminSubstRespId ? Number(adminSubstRespId) : null,
+      });
       setAdminOpDetailOpen(false);
       await loadAdminQueues();
+      await loadMasters();
+      await reloadMeusKits();
     } catch (e) {
       toast(e?.message ?? "Falha ao aprovar substituição.");
     } finally {
@@ -1930,10 +2259,152 @@ export default function App() {
     );
   }
 
+  async function recusarSubstituicaoAdmin() {
+    const id = adminOpDetail?.id;
+    if (!id) return;
+    const pin = window.prompt("PIN admin (4 dígitos):");
+    if (pin == null) return;
+    const motivo = window.prompt("Motivo da recusa (ex.: sem avulso equivalente):") || "";
+    setAdminOpActionLoading(true);
+    try {
+      await adminOperacaoRecusarSubstituicao(id, String(pin).trim(), motivo);
+      setAdminOpDetailOpen(false);
+      await loadAdminQueues();
+      await loadMasters();
+      await reloadMeusKits();
+    } catch (e) {
+      toast(e?.message ?? "Falha ao recusar substituição.");
+    } finally {
+      setAdminOpActionLoading(false);
+    }
+  }
+
+  async function loadEntregaSubstitutos(item) {
+    if (!item?.descricao_canonica || !adminOpDetail?.contexto?.kit?.id) return;
+    updateAdminEntregaItem(item.solicitacao_item_id, { substitutos_loading: true });
+    try {
+      const res = await adminSubstituicaoCandidatos({
+        descricaoCanonica: item.descricao_canonica,
+        descricao: item.descricao || "",
+        kitId: adminOpDetail?.contexto?.kit?.id,
+      });
+      updateAdminEntregaItem(item.solicitacao_item_id, { substitutos: safeArray(res?.avulsos) });
+    } catch {
+      updateAdminEntregaItem(item.solicitacao_item_id, { substitutos: [] });
+    } finally {
+      updateAdminEntregaItem(item.solicitacao_item_id, { substitutos_loading: false });
+    }
+  }
+
   function updateAdminDevolucaoItem(id, patch) {
     setAdminDevolucaoItens((prev) =>
       prev.map((it) => (it.item_id === id ? { ...it, ...patch } : it))
     );
+  }
+
+  function openTermoPerdaForItem(item) {
+    if (!item?.responsavel_id || !item?.responsavel_tipo) {
+      toast("Selecione o responsável antes de gerar o termo de perda.");
+      return;
+    }
+    setAdminTermoPerdaItem(item);
+    setAdminTermoPerdaAssinatura(item.responsavel_label || "");
+    setAdminTermoPerdaMsg("");
+    setAdminTermoPerdaOpen(true);
+  }
+
+  async function submitTermoPerda() {
+    if (!adminTermoPerdaItem) return;
+    const kitId = adminOpDetail?.contexto?.kit?.id;
+    const kitLabel = adminOpDetail?.contexto?.kit?.nome || (kitId ? `KIT ${kitId}` : "");
+    const itemRef = `${adminTermoPerdaItem.patrimonio}${adminTermoPerdaItem.descricao ? ` - ${adminTermoPerdaItem.descricao}` : ""}`;
+    const respRef = adminTermoPerdaItem.responsavel_label || "";
+    const nome = (adminTermoPerdaAssinatura || "").trim();
+
+    if (!kitId) {
+      setAdminTermoPerdaMsg("Kit não identificado para termo de perda.");
+      return;
+    }
+    if (!nome) {
+      setAdminTermoPerdaMsg("Informe o nome para assinatura.");
+      return;
+    }
+
+    setAdminTermoPerdaSubmitting(true);
+    setAdminTermoPerdaMsg("");
+    try {
+      const payload = {
+        tipo: "PERDA",
+        referencia_tipo: "KIT",
+        referencia_id: Number(kitId),
+        texto_termo: buildTermoPerdaTexto({
+          kitRef: kitLabel,
+          itemRef,
+          responsavelRef: respRef,
+        }),
+        assinatura_nome: nome,
+      };
+      const res = await criarTermo(payload);
+      updateAdminDevolucaoItem(adminTermoPerdaItem.item_id, { termo_id: res?.id || "" });
+      setAdminTermoPerdaOpen(false);
+    } catch (e) {
+      setAdminTermoPerdaMsg(e?.message ?? "Falha ao gerar termo de perda.");
+    } finally {
+      setAdminTermoPerdaSubmitting(false);
+    }
+  }
+
+  function openSubstTermoPerda() {
+    if (!adminSubstRespId || !adminSubstRespTipo) {
+      setAdminSubstTermoMsg("Selecione o responsável antes de gerar o termo.");
+      return;
+    }
+    setAdminSubstTermoAssinatura(adminSubstRespLabel || "");
+    setAdminSubstTermoMsg("");
+    setAdminSubstTermoOpen(true);
+  }
+
+  async function submitSubstTermoPerda() {
+    const kitId = adminOpDetail?.contexto?.kit?.id;
+    const kitLabel = adminOpDetail?.contexto?.kit?.nome || (kitId ? `KIT ${kitId}` : "");
+    const itemOrig = adminOpDetail?.contexto?.item_original;
+    const itemRef = itemOrig
+      ? `${itemOrig.patrimonio || ""}${itemOrig.descricao ? ` - ${itemOrig.descricao}` : ""}`
+      : "";
+    const respRef = adminSubstRespLabel || "";
+    const nome = (adminSubstTermoAssinatura || "").trim();
+
+    if (!kitId) {
+      setAdminSubstTermoMsg("Kit não identificado para termo de perda.");
+      return;
+    }
+    if (!nome) {
+      setAdminSubstTermoMsg("Informe o nome para assinatura.");
+      return;
+    }
+
+    setAdminTermoPerdaSubmitting(true);
+    setAdminSubstTermoMsg("");
+    try {
+      const payload = {
+        tipo: "PERDA",
+        referencia_tipo: "KIT",
+        referencia_id: Number(kitId),
+        texto_termo: buildTermoPerdaTexto({
+          kitRef: kitLabel,
+          itemRef,
+          responsavelRef: respRef,
+        }),
+        assinatura_nome: nome,
+      };
+      const res = await criarTermo(payload);
+      setAdminSubstTermoId(res?.id || "");
+      setAdminSubstTermoOpen(false);
+    } catch (e) {
+      setAdminSubstTermoMsg(e?.message ?? "Falha ao gerar termo de perda.");
+    } finally {
+      setAdminTermoPerdaSubmitting(false);
+    }
   }
 
   async function confirmarEntregaAdmin() {
@@ -1943,11 +2414,20 @@ export default function App() {
       toast("Informe o PIN do admin.");
       return;
     }
+    if (adminEntregaInvalid) {
+      toast("Selecione substituto para todos os itens AUSENTES.");
+      return;
+    }
     setAdminOpActionLoading(true);
     try {
+      const itensPayload = adminEntregaItens.map((it) => ({
+        solicitacao_item_id: Number(it.solicitacao_item_id),
+        status: it.status,
+        item_substituto_id: it.item_substituto_id ? Number(it.item_substituto_id) : null,
+      }));
       await adminOperacaoConferirEntrega(id, {
         admin_pin: adminEntregaPinAdmin.trim(),
-        itens: adminEntregaItens,
+        itens: itensPayload,
       });
       setAdminOpDetailOpen(false);
       await loadAdminQueues();
@@ -1968,12 +2448,46 @@ export default function App() {
       toast("Informe o PIN do admin.");
       return;
     }
+    const invalid = adminDevolucaoItens.find((it) => {
+      const st = (it.status || "").toUpperCase();
+      if (st !== "AUSENTE") return false;
+      const motivo = (it.motivo || "").toUpperCase();
+      if (!motivo) return true;
+      if (motivo === "FURTO") {
+        return !(it.bo_ref || "").trim();
+      }
+      if (motivo === "PERDA") {
+        return !(it.responsavel_tipo && it.responsavel_id && it.termo_id);
+      }
+      return true;
+    });
+    if (invalid) {
+      toast("Preencha motivo e evidências obrigatórias nos itens AUSENTES.");
+      return;
+    }
     setAdminOpActionLoading(true);
     try {
+      const itensPayload = adminDevolucaoItens.map((it) => ({
+        item_id: Number(it.item_id),
+        status: it.status,
+        motivo: (it.motivo || "").trim() || null,
+        bo_ref: (it.bo_ref || "").trim() || null,
+        termo_id: it.termo_id ? Number(it.termo_id) : null,
+        responsavel_tipo: (it.responsavel_tipo || "").trim() || null,
+        responsavel_id: it.responsavel_id ? Number(it.responsavel_id) : null,
+      }));
       await adminOperacaoConferirDevolucao(id, {
         admin_pin: adminDevolucaoPinAdmin.trim(),
-        itens: adminDevolucaoItens,
+        itens: itensPayload,
       });
+      const hasAusente = adminDevolucaoItens.some(
+        (it) => (it.status || "").toUpperCase() === "AUSENTE"
+      );
+      toast(
+        hasAusente
+          ? "Devolução concluída. Kit ficou com pendência e não ficará disponível até resolução."
+          : "Devolução concluída. Kit voltou para disponível."
+      );
       setAdminOpDetailOpen(false);
       await loadAdminQueues();
       await loadAdminPendencias();
@@ -2154,15 +2668,58 @@ export default function App() {
     }
   }, []);
 
-  async function resolverPendenciaKit(pendenciaId) {
-    if (!pendenciaId) return;
+  async function openPendenciaKit(pendencia) {
+    if (!pendencia) return;
+    setAdminPendenciaSel(pendencia);
+    setAdminPendenciaAction("");
+    setAdminPendenciaSubstitutoId("");
+    setAdminPendenciaSubstitutos([]);
+    setAdminPendenciaMsg("");
+    setAdminPendenciaOpen(true);
+    const canon = (pendencia.descricao_canonica || "").trim();
+    if (canon) {
+      setAdminPendenciaSubstitutosLoading(true);
+      try {
+      const res = await adminSubstituicaoCandidatos({
+        descricaoCanonica: canon,
+        descricao: adminPendenciaSel?.descricao_canonica ? "" : adminPendenciaSel?.descricao || "",
+        kitId: pendencia.kit_id,
+      });
+        setAdminPendenciaSubstitutos(safeArray(res?.avulsos));
+      } catch {
+        setAdminPendenciaSubstitutos([]);
+      } finally {
+        setAdminPendenciaSubstitutosLoading(false);
+      }
+    }
+  }
+
+  async function submitPendenciaKitResolution() {
+    if (!adminPendenciaSel?.id) return;
+    const acao = (adminPendenciaAction || "").toUpperCase();
+    if (acao !== "SUBSTITUIR_AVULSO" && acao !== "REPOR_MESMO") {
+      setAdminPendenciaMsg("Selecione a ação de resolução.");
+      return;
+    }
+    if (acao === "SUBSTITUIR_AVULSO" && !adminPendenciaSubstitutoId) {
+      setAdminPendenciaMsg("Selecione o item substituto.");
+      return;
+    }
     setAdminPendenciasLoading(true);
     try {
-      await adminResolverPendenciaKit(pendenciaId);
+      await adminResolverPendenciaKit(adminPendenciaSel.id, {
+        acao,
+        item_substituto_id: adminPendenciaSubstitutoId
+          ? Number(adminPendenciaSubstitutoId)
+          : undefined,
+      });
+      setAdminPendenciaOpen(false);
       await loadAdminPendencias();
       await loadMasters();
+      toast("Pendência resolvida.");
     } catch (e) {
-      toast(e?.message ?? "Falha ao resolver pendência.");
+      const msg = e?.message ?? "Falha ao resolver pendência.";
+      setAdminPendenciaMsg(msg);
     } finally {
       setAdminPendenciasLoading(false);
     }
@@ -2318,9 +2875,18 @@ export default function App() {
       reloadMeusKits();
       reloadMeusAvulsos();
       reloadDisponiveis();
-    }, 15000);
+    }, 5000);
 
     const onFocus = () => {
+      refreshStatusOverview();
+      refreshPendingOps();
+      processPendingOps();
+      reloadMeusKits();
+      reloadMeusAvulsos();
+      reloadDisponiveis();
+    };
+    const onVisibility = () => {
+      if (document.visibilityState !== "visible") return;
       refreshStatusOverview();
       refreshPendingOps();
       processPendingOps();
@@ -2335,11 +2901,13 @@ export default function App() {
       reloadDisponiveis();
     };
     window.addEventListener("focus", onFocus);
+    document.addEventListener("visibilitychange", onVisibility);
     window.addEventListener("online", onOnline);
 
     return () => {
       clearInterval(t);
       window.removeEventListener("focus", onFocus);
+      document.removeEventListener("visibilitychange", onVisibility);
       window.removeEventListener("online", onOnline);
     };
   }, [
@@ -2507,7 +3075,7 @@ export default function App() {
     }
   }
 
-  function handleLogout() {
+  function handleLogout(reason = "") {
     localStorage.removeItem("token");
     localStorage.removeItem("access_token");
     localStorage.removeItem("auth_token");
@@ -2516,11 +3084,23 @@ export default function App() {
     setCurrentUser(null);
     setAuthUser("");
     setAuthPass("");
-    setAuthErr("");
+    setAuthErr(reason);
     setAuthNotice("");
     setMustSetAdminPin(false);
     goTo("/login");
   }
+
+  useEffect(() => {
+    function onAuthExpired() {
+      if (!authToken) return;
+      handleLogout("Sessao expirada. Faca login novamente.");
+    }
+
+    window.addEventListener("auth:expired", onAuthExpired);
+    return () => {
+      window.removeEventListener("auth:expired", onAuthExpired);
+    };
+  }, [authToken]);
 
   async function submitNewPassword() {
     setNewPassErr("");
@@ -2758,7 +3338,9 @@ export default function App() {
     }
 
     const pendingRequests =
-      pendingDevolucaoKits.size + pendingDevolucaoAvulsos.size + pendingSubstituicoes.size;
+      pendingDevolucaoKits.size +
+      pendingDevolucaoAvulsos.size +
+      pendingSubstituicoesAll.size;
 
     return {
       total,
@@ -2766,9 +3348,42 @@ export default function App() {
       distribuido,
       pendente: pendente + pendingRequests,
     };
-  }, [kitItens, statusMap, pendingDevolucaoKits, pendingDevolucaoAvulsos, pendingSubstituicoes]);
+  }, [
+    kitItens,
+    statusMap,
+    pendingDevolucaoKits,
+    pendingDevolucaoAvulsos,
+    pendingSubstituicoesAll,
+  ]);
 
-  function buildManualTermoTexto(itemName) {
+  function buildSolicitacaoEletricaTermoTexto({ kitRef = "", subRef = "" } = {}) {
+    const parts = [
+      "TERMO DE RESPONSABILIDADE – RETIRADA E CUSTÓDIA DE KIT",
+      "Declaro que recebi da empresa o kit identificado no sistema, comprometendo-me a:",
+      "1) Zelar, guardar e utilizar corretamente os bens que compõem o kit, mantendo-os sob minha custódia enquanto estiverem sob minha responsabilidade.",
+      "2) Não ceder, transferir, emprestar ou subdividir a posse do kit ou de quaisquer de seus itens sem o devido registro e autorização no sistema.",
+      "3) Comunicar imediatamente qualquer ocorrência de extravio, dano, roubo, furto, sinistro ou irregularidade, permitindo a apuração interna e a adoção das medidas cabíveis.",
+      "4) Reconheço que, havendo comprovação de conduta dolosa ou culposa e do nexo de causalidade com eventual prejuízo, poderei ser responsabilizado civilmente e/ou submetido às medidas cabíveis, inclusive ressarcimento, na forma da lei, observadas as normas trabalhistas aplicáveis e o devido processo de apuração.",
+      "5) Autorizo o registro, para fins de segurança, auditoria e rastreabilidade, de informações como data e hora, identificação do usuário, endereço IP, user-agent e, quando disponível, dados de geolocalização, estritamente limitados à finalidade de controle patrimonial e prevenção de perdas.",
+      "6) Autorizo, quando cabível e observado o devido processo de apuração e a legislação vigente, eventual desconto ou ressarcimento relacionado a perdas e danos comprovados, nos termos da lei.",
+      "",
+      `KIT: ${kitRef}`,
+      subRef ? `SUBRESPONSÁVEL (quando aplicável): ${subRef}` : "",
+      `DATA/HORA: ${new Date().toLocaleString()}`,
+    ].filter(Boolean);
+    return parts.join("\n");
+  }
+
+  function buildManualTermoTexto(item) {
+    const nome = typeof item === "string" ? item : item?.nome || "";
+    const patrimonio = item?.patrimonio || item?.codigo || item?.id || "";
+    const desc = item?.descricao || item?.nome || "";
+    const itemRef = patrimonio ? `${patrimonio}${desc ? ` - ${desc}` : ""}` : nome;
+
+    if (modo === "eletrico") {
+      return buildSolicitacaoEletricaTermoTexto({ kitRef: itemRef });
+    }
+
     const parts = [
       "TERMO DE RESPONSABILIDADE - RETIRADA DE ITEM MANUAL",
       "Declaro que recebi da empresa o item manual identificado no sistema, comprometendo-me a:",
@@ -2778,7 +3393,7 @@ export default function App() {
       "4) Reconheco que, havendo comprovacao de conduta dolosa ou culposa e do nexo com o prejuizo, podera haver responsabilizacao civil e/ou medidas cabiveis, com eventual ressarcimento na forma da lei, observadas as regras trabalhistas aplicaveis e o devido processo de apuracao.",
       "5) Autorizo o registro, para fins de seguranca, auditoria e rastreabilidade, de data/hora, identificacao do usuario, IP, user-agent e, quando disponivel, geolocalizacao, limitado a finalidade de controle patrimonial e prevencao de perdas.",
       "",
-      `ITEM: ${itemName}`,
+      `ITEM: ${nome}`,
       `DATA/HORA: ${new Date().toLocaleString()}`,
     ];
     return parts.join("\n");
@@ -2786,15 +3401,7 @@ export default function App() {
 
   function buildChecklistTermoTexto() {
     const kitRef = (kitLabel ?? "").trim() || `KIT ${selectedKitId || ""}`.trim();
-    const parts = [
-      "TERMO DE RESPONSABILIDADE - CHECKLIST DE KIT ELETRICO",
-      "Declaro que conferi o kit identificado no sistema, mantendo a custodia sob minha responsabilidade.",
-      "Comprometo-me a zelar, guardar e utilizar corretamente os bens, comunicando de imediato qualquer dano ou extravio.",
-      "",
-      `KIT: ${kitRef}`,
-      `DATA/HORA: ${new Date().toLocaleString()}`,
-    ].filter(Boolean);
-    return parts.join("\n");
+    return buildSolicitacaoEletricaTermoTexto({ kitRef });
   }
 
   /**
@@ -3053,7 +3660,7 @@ export default function App() {
         tipo: "RETIRADA",
         referencia_tipo: "ITEM_MANUAL",
         referencia_id: Number(manualSel.id),
-        texto_termo: buildManualTermoTexto(manualSel.nome),
+        texto_termo: buildManualTermoTexto(manualSel),
         assinatura_nome: nome,
         latitude: isGpsValid(geo) ? Number(geo.latitude ?? 0) : null,
         longitude: isGpsValid(geo) ? Number(geo.longitude ?? 0) : null,
@@ -3244,6 +3851,10 @@ export default function App() {
       toast("Kit inválido para devolução.");
       return;
     }
+    const ok = window.confirm(
+      "Confirmar solicitação de devolução deste kit? Essa ação não pode ser desfeita."
+    );
+    if (!ok) return;
     if (pendingDevolucaoKits.has(String(kitId))) {
       toast("Devolução já solicitada para este kit.");
       return;
@@ -3338,19 +3949,24 @@ export default function App() {
     }
   }
 
-  // 3) Solicitar substituição (usuário só solicita + motivo; admin escolhe equivalente e valida com PIN)
-  function handleSolicitarSubstituicao(item) {
-    if (!selectedKitId || !item) return;
-    setSubstModalItem(item);
-    setSubstObservacao("");
+  // 3) Solicitar substituição (usuário só confirma; admin define motivo e substituto)
+  function handleSolicitarSubstituicao(item, kitId) {
+    const kitRef = kitId || item?.kit_id || null;
+    if (!kitRef || !item) {
+      toast("Kit inválido para substituição.");
+      return;
+    }
+    const ok = window.confirm(
+      `Confirmar solicitação de substituição?\n\n${item.patrimonio} - ${item.descricao}`
+    );
+    if (!ok) return;
+    submitSolicitacaoSubstituicao(item, kitRef);
   }
 
-  async function submitSolicitacaoSubstituicao(motivo) {
-    console.log("CLICK SUBSTITUICAO", substModalItem);
+  async function submitSolicitacaoSubstituicao(item, kitRef) {
+    console.log("CLICK SUBSTITUICAO", item);
     toast("SUBSTITUICAO click");
-    if (!selectedKitId || !substModalItem) return;
-
-    if (!["MANUTENCAO", "FURTO"].includes(motivo)) return;
+    if (!kitRef || !item) return;
 
     if (!authToken) {
       toast("Faça login antes de solicitar substituição.");
@@ -3359,7 +3975,7 @@ export default function App() {
 
     setSubstSubmitting(true);
     const substItemId = Number(
-      substModalItem.item_id ?? substModalItem.id ?? substModalItem.kit_item_id
+      item.item_id ?? item.id ?? item.kit_item_id
     );
     if (!substItemId) {
       toast("Item inválido para substituição.");
@@ -3372,7 +3988,7 @@ export default function App() {
       return;
     }
     try {
-        const resp = await fetch(`${apiBase}/solicitacoes/operacao/`, {
+      const resp = await fetch(`${apiBase}/solicitacoes/operacao/`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -3380,25 +3996,31 @@ export default function App() {
         },
         body: JSON.stringify({
           tipo: "SUBSTITUICAO_ITEM",
-          kit_id: Number(selectedKitId),
+          kit_id: Number(kitRef),
           item_id: substItemId,
-          motivo,
-          observacao: substObservacao ? `PWA: ${substObservacao}` : "PWA",
+          motivo: "PENDENTE_ADMIN",
+          observacao: "PWA",
         }),
       });
 
       if (!resp.ok) {
-        const err = await resp.json().catch(() => null);
-        throw new Error(err?.detail ?? err?.message ?? resp.statusText);
+        const txt = await resp.text().catch(() => "");
+        let msg = resp.statusText;
+        try {
+          const j = JSON.parse(txt);
+          msg = j?.detail ?? j?.message ?? msg;
+        } catch {
+          if (txt) msg = txt;
+        }
+        throw new Error(msg);
       }
 
       toast("Solicitação de substituição enviada. Admin vai escolher equivalente e validar com PIN.");
       addPendingSubstituicao(substItemId);
       refreshPendingOps();
       refreshStatusOverview();
-      setSubstModalItem(null);
     } catch (e) {
-      toast("Não consegui registrar no backend (endpoint de substituição ainda não confirmado).");
+      toast(e?.message ?? "Falha ao solicitar substituição.");
       console.warn("substituicao request error:", e);
     } finally {
       setSubstSubmitting(false);
@@ -3675,7 +4297,7 @@ export default function App() {
           marginBottom: 12,
           background: "#f7f7f7",
         }}
-      >
+        >
         <div className="user-topbar__text" style={{ flex: 1, minWidth: 0 }}>
           <div className="user-topbar__title" style={{ fontWeight: 800 }}>
             Usuário
@@ -3723,6 +4345,21 @@ export default function App() {
           Sair
         </button>
       </header>
+      {uiMsg ? (
+        <div
+          style={{
+            marginBottom: 12,
+            padding: "10px 12px",
+            borderRadius: 10,
+            border: "1px solid rgba(255,255,255,0.2)",
+            background: "rgba(0,0,0,0.35)",
+            color: "#fff",
+            fontSize: 12,
+          }}
+        >
+          {uiMsg}
+        </div>
+      ) : null}
 
 
 
@@ -4035,7 +4672,7 @@ export default function App() {
                       </div>
                     </div>
                     <button
-                      onClick={() => resolverPendenciaKit(p.id)}
+                      onClick={() => openPendenciaKit(p)}
                       disabled={adminPendenciasLoading}
                       style={{
                         padding: "2px 6px",
@@ -4044,7 +4681,7 @@ export default function App() {
                         cursor: adminPendenciasLoading ? "not-allowed" : "pointer",
                       }}
                     >
-                      Resolver
+                      Detalhar
                     </button>
                   </div>
                 ))
@@ -4719,49 +5356,41 @@ export default function App() {
                                 <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
                                   <select
                                     value={it.status}
-                                    onChange={(e) =>
-                                      updateAdminEntregaItem(it.solicitacao_item_id, { status: e.target.value })
-                                    }
+                                    onChange={(e) => {
+                                      const next = e.target.value;
+                                      updateAdminEntregaItem(it.solicitacao_item_id, { status: next });
+                                      if (next === "AUSENTE") {
+                                        loadEntregaSubstitutos(it);
+                                      }
+                                    }}
                                     style={{ padding: 6, minWidth: 140 }}
                                   >
                                     <option value="PRESENTE">PRESENTE</option>
                                     <option value="AUSENTE">AUSENTE</option>
-                                    <option value="DEFEITO">DEFEITO</option>
                                   </select>
 
-                                  {it.status !== "PRESENTE" ? (
+                                  {it.status === "AUSENTE" ? (
                                     <select
-                                      value={it.acao}
+                                      value={it.item_substituto_id}
                                       onChange={(e) =>
-                                        updateAdminEntregaItem(it.solicitacao_item_id, { acao: e.target.value })
+                                        updateAdminEntregaItem(it.solicitacao_item_id, {
+                                          item_substituto_id: e.target.value,
+                                        })
                                       }
-                                      style={{ padding: 6, minWidth: 180 }}
+                                      style={{ padding: 6, minWidth: 220 }}
                                     >
-                                      <option value="SUBSTITUICAO">Gerar substituição</option>
-                                      <option value="PENDENCIA">Entregar com pendência</option>
+                                      <option value="">Selecionar substituto equivalente</option>
+                                      {it.substitutos.map((sub) => (
+                                        <option key={sub.id} value={sub.id}>
+                                          {sub.patrimonio} - {sub.descricao}
+                                        </option>
+                                      ))}
                                     </select>
                                   ) : null}
                                 </div>
 
-                                {it.status !== "PRESENTE" ? (
-                                  <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-                                    <input
-                                      value={it.motivo}
-                                      onChange={(e) =>
-                                        updateAdminEntregaItem(it.solicitacao_item_id, { motivo: e.target.value })
-                                      }
-                                      placeholder="Motivo (ex.: DEFEITO)"
-                                      style={{ flex: 1, minWidth: 160, padding: 6 }}
-                                    />
-                                    <input
-                                      value={it.observacao}
-                                      onChange={(e) =>
-                                        updateAdminEntregaItem(it.solicitacao_item_id, { observacao: e.target.value })
-                                      }
-                                      placeholder="Observação"
-                                      style={{ flex: 1, minWidth: 160, padding: 6 }}
-                                    />
-                                  </div>
+                                {it.status === "AUSENTE" && it.substitutos_loading ? (
+                                  <div style={{ fontSize: 12, opacity: 0.7 }}>Carregando substitutos...</div>
                                 ) : null}
                               </div>
                             ))}
@@ -4774,6 +5403,11 @@ export default function App() {
                               placeholder="PIN admin (4 dígitos)"
                               style={{ padding: 8 }}
                             />
+                            {adminEntregaInvalid ? (
+                              <div style={{ fontSize: 12, color: "#b00020" }}>
+                                Itens AUSENTES exigem substituto equivalente.
+                              </div>
+                            ) : null}
                           </div>
                         </div>
                       ) : null}
@@ -4822,14 +5456,52 @@ export default function App() {
                                       <option value="PERDA">PERDA</option>
                                       <option value="FURTO">FURTO</option>
                                     </select>
-                                    <input
-                                      value={it.anexo_path}
-                                      onChange={(e) =>
-                                        updateAdminDevolucaoItem(it.item_id, { anexo_path: e.target.value })
-                                      }
-                                      placeholder="Caminho do BO/termo"
-                                      style={{ flex: 1, minWidth: 180, padding: 6 }}
-                                    />
+                                    {it.motivo === "FURTO" ? (
+                                      <input
+                                        value={it.bo_ref}
+                                        onChange={(e) =>
+                                          updateAdminDevolucaoItem(it.item_id, { bo_ref: e.target.value })
+                                        }
+                                        placeholder="Referência do BO (caminho/link)"
+                                        style={{ flex: 1, minWidth: 220, padding: 6 }}
+                                      />
+                                    ) : null}
+                                    {it.motivo === "PERDA" ? (
+                                      <div style={{ display: "grid", gap: 6, flex: 1, minWidth: 240 }}>
+                                        <ResponsavelPicker
+                                          valueText={it.responsavel_label}
+                                          selectedId={it.responsavel_id}
+                                          selectedTipo={it.responsavel_tipo}
+                                          onPick={(opt) =>
+                                            updateAdminDevolucaoItem(it.item_id, {
+                                              responsavel_tipo: opt?.tipo || "",
+                                              responsavel_id: opt?.id || "",
+                                              responsavel_label: opt?.label || "",
+                                            })
+                                          }
+                                        />
+                                        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                                          <button
+                                            type="button"
+                                            onClick={() => openTermoPerdaForItem(it)}
+                                            style={{
+                                              padding: "6px 10px",
+                                              borderRadius: 6,
+                                              border: "1px solid #111",
+                                              background: "#111",
+                                              color: "#fff",
+                                              cursor: "pointer",
+                                              fontWeight: 700,
+                                            }}
+                                          >
+                                            Gerar termo de perda
+                                          </button>
+                                          <div style={{ fontSize: 12, opacity: 0.8, alignSelf: "center" }}>
+                                            {it.termo_id ? `Termo #${it.termo_id}` : "Termo não gerado"}
+                                          </div>
+                                        </div>
+                                      </div>
+                                    ) : null}
                                   </div>
                                 ) : null}
                               </div>
@@ -4841,11 +5513,84 @@ export default function App() {
                             placeholder="PIN admin (4 dígitos)"
                             style={{ padding: 8, marginTop: 10, width: "100%" }}
                           />
+                          {adminDevolucaoInvalid ? (
+                            <div style={{ marginTop: 6, fontSize: 12, color: "#b00020" }}>
+                              Há itens AUSENTES sem motivo/evidência obrigatória.
+                            </div>
+                          ) : null}
                         </div>
                       ) : null}
 
                       {adminOpDetail.tipo === "SUBSTITUICAO" ? (
                         <div style={{ marginBottom: 10 }}>
+                          <div style={{ fontSize: 12, fontWeight: 700, marginBottom: 6 }}>
+                            Motivo da substituição
+                          </div>
+                          <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 8 }}>
+                            {["PERDA", "FURTO", "MANUTENCAO"].map((m) => (
+                              <button
+                                key={m}
+                                type="button"
+                                onClick={() => setAdminSubstMotivo(m)}
+                                style={{
+                                  padding: "6px 10px",
+                                  borderRadius: 8,
+                                  border: "1px solid #111",
+                                  background: adminSubstMotivo === m ? "#111" : "#fff",
+                                  color: adminSubstMotivo === m ? "#fff" : "#111",
+                                  cursor: "pointer",
+                                  fontWeight: 700,
+                                }}
+                              >
+                                {m === "MANUTENCAO" ? "MANUTENÇÃO" : m}
+                              </button>
+                            ))}
+                          </div>
+
+                          {adminSubstMotivo === "FURTO" ? (
+                            <input
+                              value={adminSubstBoRef}
+                              onChange={(e) => setAdminSubstBoRef(e.target.value)}
+                              placeholder="Referência do BO (caminho/link)"
+                              style={{ width: "100%", padding: 8, marginBottom: 8 }}
+                            />
+                          ) : null}
+
+                          {adminSubstMotivo === "PERDA" ? (
+                            <div style={{ display: "grid", gap: 6, marginBottom: 8 }}>
+                              <ResponsavelPicker
+                                valueText={adminSubstRespLabel}
+                                selectedId={adminSubstRespId}
+                                selectedTipo={adminSubstRespTipo}
+                                onPick={(opt) => {
+                                  setAdminSubstRespTipo(opt?.tipo || "");
+                                  setAdminSubstRespId(opt?.id || "");
+                                  setAdminSubstRespLabel(opt?.label || "");
+                                }}
+                              />
+                              <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                                <button
+                                  type="button"
+                                  onClick={openSubstTermoPerda}
+                                  style={{
+                                    padding: "6px 10px",
+                                    borderRadius: 6,
+                                    border: "1px solid #111",
+                                    background: "#111",
+                                    color: "#fff",
+                                    cursor: "pointer",
+                                    fontWeight: 700,
+                                  }}
+                                >
+                                  Gerar termo de perda
+                                </button>
+                                <div style={{ fontSize: 12, opacity: 0.8 }}>
+                                  {adminSubstTermoId ? `Termo #${adminSubstTermoId}` : "Termo não gerado"}
+                                </div>
+                              </div>
+                            </div>
+                          ) : null}
+
                           <label style={{ fontSize: 12, opacity: 0.8 }}>
                             Substituto equivalente ({adminDescricaoCanonica || "sem descricao"})
                           </label>
@@ -4854,27 +5599,42 @@ export default function App() {
                               Item sem classe_tipo — substituição bloqueada.
                             </div>
                           ) : null}
-                          {adminSubstitutosDisponiveis.length ? (
-                            <select
-                              style={{ width: "100%", padding: 10, marginTop: 4 }}
-                              value={adminSubstitutoId}
-                              onChange={(e) => setAdminSubstitutoId(e.target.value)}
-                            >
-                              <option value="">Selecione o substituto</option>
-                              {adminSubstitutosDisponiveis.map((it) => (
-                                <option key={it.id} value={it.id}>
-                                  {it.patrimonio} - {it.descricao}
-                                </option>
-                              ))}
-                            </select>
+                          {(adminSubstMotivo === "MANUTENCAO" ||
+                            (adminSubstMotivo === "FURTO" && adminSubstBoRef) ||
+                            (adminSubstMotivo === "PERDA" && adminSubstTermoId)) ? (
+                            adminSubstitutosDisponiveis.length ? (
+                              <select
+                                style={{ width: "100%", padding: 10, marginTop: 4 }}
+                                value={adminSubstitutoId}
+                                onChange={(e) => setAdminSubstitutoId(e.target.value)}
+                              >
+                                <option value="">Selecione o substituto</option>
+                                {adminSubstitutosDisponiveis.map((it) => (
+                                  <option key={it.id} value={it.id}>
+                                    {it.patrimonio} - {it.descricao}
+                                  </option>
+                                ))}
+                              </select>
+                            ) : (
+                              <div style={{ display: "grid", gap: 6, marginTop: 6 }}>
+                                <div style={{ fontSize: 12, color: "#b00020" }}>
+                                  Sem avulsos equivalentes disponíveis.
+                                </div>
+                                <input
+                                  style={{ width: "100%", padding: 10 }}
+                                  value={adminSubstitutoId}
+                                  onChange={(e) => setAdminSubstitutoId(e.target.value)}
+                                  placeholder={
+                                    adminSubstitutosLoading ? "Carregando substitutos..." : "Digite o ID do avulso"
+                                  }
+                                  disabled={adminSubstitutosLoading}
+                                />
+                              </div>
+                            )
                           ) : (
-                            <input
-                              style={{ width: "100%", padding: 10, marginTop: 4 }}
-                              value={adminSubstitutoId}
-                              onChange={(e) => setAdminSubstitutoId(e.target.value)}
-                              placeholder={adminSubstitutosLoading ? "Carregando substitutos..." : "Ex: 777"}
-                              disabled={adminSubstitutosLoading}
-                            />
+                            <div style={{ fontSize: 12, opacity: 0.7, marginTop: 6 }}>
+                              Preencha motivo e evidências para liberar o seletor de substituto.
+                            </div>
                           )}
                         </div>
                       ) : null}
@@ -4902,7 +5662,7 @@ export default function App() {
                     {adminOpDetail?.tipo === "SOLICITACAO" ? (
                       <button
                         onClick={confirmarEntregaAdmin}
-                        disabled={adminOpActionLoading}
+                        disabled={adminOpActionLoading || adminEntregaInvalid || !adminEntregaPinAdmin.trim()}
                         style={{
                           padding: "8px 12px",
                           borderRadius: 8,
@@ -4918,31 +5678,52 @@ export default function App() {
                     ) : null}
 
                     {adminOpDetail?.tipo === "SUBSTITUICAO" ? (
-                      <button
-                        onClick={aprovarSubstituicaoAdmin}
-                        disabled={
-                          adminOpActionLoading ||
-                          adminSubstBloqueada ||
-                          !adminSubstitutoId
-                        }
-                        style={{
-                          padding: "8px 12px",
-                          borderRadius: 8,
-                          border: "1px solid #111",
-                          background: "#111",
-                          color: "#fff",
-                          cursor: adminOpActionLoading ? "not-allowed" : "pointer",
-                          fontWeight: 800,
-                        }}
-                      >
-                        {adminOpActionLoading ? "Processando..." : "Aprovar substituição"}
-                      </button>
+                      <>
+                        <button
+                          onClick={recusarSubstituicaoAdmin}
+                          disabled={adminOpActionLoading}
+                          style={{
+                            padding: "8px 12px",
+                            borderRadius: 8,
+                            border: "1px solid #b00020",
+                            background: "#fff",
+                            color: "#b00020",
+                            cursor: adminOpActionLoading ? "not-allowed" : "pointer",
+                            fontWeight: 800,
+                          }}
+                        >
+                          {adminOpActionLoading ? "Processando..." : "Recusar substituição"}
+                        </button>
+                        <button
+                          onClick={aprovarSubstituicaoAdmin}
+                          disabled={
+                            adminOpActionLoading ||
+                            adminSubstBloqueada ||
+                            adminSubstInvalid
+                          }
+                          style={{
+                            padding: "8px 12px",
+                            borderRadius: 8,
+                            border: "1px solid #111",
+                            background: "#111",
+                            color: "#fff",
+                            cursor: adminOpActionLoading ? "not-allowed" : "pointer",
+                            fontWeight: 800,
+                          }}
+                        >
+                          {adminOpActionLoading ? "Processando..." : "Aprovar substituição"}
+                        </button>
+                      </>
                     ) : null}
 
                     {adminOpDetail?.tipo === "DEVOLUCAO" ? (
                       <button
                         onClick={confirmarDevolucaoDetalhada}
-                        disabled={adminOpActionLoading}
+                        disabled={
+                          adminOpActionLoading ||
+                          adminDevolucaoInvalid ||
+                          !adminDevolucaoPinAdmin.trim()
+                        }
                         style={{
                           padding: "8px 12px",
                           borderRadius: 8,
@@ -5010,6 +5791,370 @@ export default function App() {
                       }}
                     >
                       Fechar
+                    </button>
+                  </div>
+                </div>
+              </div>
+            ) : null}
+
+            {adminTermoPerdaOpen ? (
+              <div
+                onClick={() => {
+                  if (!adminTermoPerdaSubmitting) setAdminTermoPerdaOpen(false);
+                }}
+                style={{
+                  position: "fixed",
+                  inset: 0,
+                  background: "rgba(0,0,0,0.5)",
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  zIndex: 99999,
+                  padding: 16,
+                }}
+              >
+                <div
+                  onClick={(e) => e.stopPropagation()}
+                  style={{
+                    width: "min(720px, 96vw)",
+                    background: "#fff",
+                    color: "#111",
+                    borderRadius: 12,
+                    padding: 16,
+                    boxShadow: "0 20px 60px rgba(0,0,0,.35)",
+                  }}
+                >
+                  <div style={{ fontWeight: 900, fontSize: 16, marginBottom: 8 }}>Termo de Perda</div>
+                  <div style={{ fontSize: 12, opacity: 0.8, marginBottom: 10 }}>
+                    Gere o termo antes de confirmar a devolução com PERDA.
+                  </div>
+
+                  <label style={{ fontSize: 12, opacity: 0.85 }}>
+                    Assinatura do responsável (mesa digitalizadora)
+                  </label>
+                  <input
+                    style={{ width: "100%", padding: 10, marginTop: 4, marginBottom: 8 }}
+                    value={adminTermoPerdaAssinatura}
+                    onChange={(e) => setAdminTermoPerdaAssinatura(e.target.value)}
+                    placeholder="Assinatura do responsável"
+                  />
+
+                  <label style={{ fontSize: 12, opacity: 0.85 }}>Texto do termo</label>
+                  <textarea
+                    readOnly
+                    value={buildTermoPerdaTexto({
+                      kitRef:
+                        adminOpDetail?.contexto?.kit?.nome ||
+                        (adminOpDetail?.contexto?.kit?.id ? `KIT ${adminOpDetail.contexto.kit.id}` : ""),
+                      itemRef: adminTermoPerdaItem
+                        ? `${adminTermoPerdaItem.patrimonio}${adminTermoPerdaItem.descricao ? ` - ${adminTermoPerdaItem.descricao}` : ""}`
+                        : "",
+                      responsavelRef: adminTermoPerdaItem?.responsavel_label || "",
+                    })}
+                    style={{ width: "100%", minHeight: 160, padding: 10, marginTop: 4, fontSize: 12 }}
+                  />
+
+                  {adminTermoPerdaMsg ? (
+                    <div style={{ marginTop: 8, fontSize: 12, color: "#b00020" }}>{adminTermoPerdaMsg}</div>
+                  ) : null}
+
+                  <div style={{ display: "flex", justifyContent: "flex-end", gap: 10, marginTop: 12 }}>
+                    <button
+                      onClick={() => setAdminTermoPerdaOpen(false)}
+                      disabled={adminTermoPerdaSubmitting}
+                      style={{
+                        padding: "8px 12px",
+                        borderRadius: 8,
+                        border: "1px solid #aaa",
+                        cursor: adminTermoPerdaSubmitting ? "not-allowed" : "pointer",
+                      }}
+                    >
+                      Cancelar
+                    </button>
+                    <button
+                      onClick={submitTermoPerda}
+                      disabled={adminTermoPerdaSubmitting}
+                      style={{
+                        padding: "8px 12px",
+                        borderRadius: 8,
+                        border: "1px solid #111",
+                        background: "#111",
+                        color: "#fff",
+                        cursor: adminTermoPerdaSubmitting ? "not-allowed" : "pointer",
+                        fontWeight: 800,
+                      }}
+                    >
+                      {adminTermoPerdaSubmitting ? "Salvando..." : "Gerar termo"}
+                    </button>
+                  </div>
+                </div>
+              </div>
+            ) : null}
+
+            {adminSubstTermoOpen ? (
+              <div
+                onClick={() => {
+                  if (!adminTermoPerdaSubmitting) setAdminSubstTermoOpen(false);
+                }}
+                style={{
+                  position: "fixed",
+                  inset: 0,
+                  background: "rgba(0,0,0,0.5)",
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  zIndex: 99999,
+                  padding: 16,
+                }}
+              >
+                <div
+                  onClick={(e) => e.stopPropagation()}
+                  style={{
+                    width: "min(720px, 96vw)",
+                    background: "#fff",
+                    color: "#111",
+                    borderRadius: 12,
+                    padding: 16,
+                    boxShadow: "0 20px 60px rgba(0,0,0,.35)",
+                  }}
+                >
+                  <div style={{ fontWeight: 900, fontSize: 16, marginBottom: 8 }}>Termo de Perda</div>
+                  <div style={{ fontSize: 12, opacity: 0.8, marginBottom: 10 }}>
+                    Gere o termo antes de aprovar a substituição com PERDA.
+                  </div>
+
+                  <label style={{ fontSize: 12, opacity: 0.85 }}>
+                    Assinatura do responsável (mesa digitalizadora)
+                  </label>
+                  <input
+                    style={{ width: "100%", padding: 10, marginTop: 4, marginBottom: 8 }}
+                    value={adminSubstTermoAssinatura}
+                    onChange={(e) => setAdminSubstTermoAssinatura(e.target.value)}
+                    placeholder="Assinatura do responsável"
+                  />
+
+                  <label style={{ fontSize: 12, opacity: 0.85 }}>Texto do termo</label>
+                  <textarea
+                    readOnly
+                    value={buildTermoPerdaTexto({
+                      kitRef:
+                        adminOpDetail?.contexto?.kit?.nome ||
+                        (adminOpDetail?.contexto?.kit?.id ? `KIT ${adminOpDetail.contexto.kit.id}` : ""),
+                      itemRef: adminOpDetail?.contexto?.item_original
+                        ? `${adminOpDetail.contexto.item_original.patrimonio || ""}${
+                            adminOpDetail.contexto.item_original.descricao
+                              ? ` - ${adminOpDetail.contexto.item_original.descricao}`
+                              : ""
+                          }`
+                        : "",
+                      responsavelRef: adminSubstRespLabel || "",
+                    })}
+                    style={{ width: "100%", minHeight: 160, padding: 10, marginTop: 4, fontSize: 12 }}
+                  />
+
+                  {adminSubstTermoMsg ? (
+                    <div style={{ marginTop: 8, fontSize: 12, color: "#b00020" }}>{adminSubstTermoMsg}</div>
+                  ) : null}
+
+                  <div style={{ display: "flex", justifyContent: "flex-end", gap: 10, marginTop: 12 }}>
+                    <button
+                      onClick={() => setAdminSubstTermoOpen(false)}
+                      disabled={adminTermoPerdaSubmitting}
+                      style={{
+                        padding: "8px 12px",
+                        borderRadius: 8,
+                        border: "1px solid #aaa",
+                        cursor: adminTermoPerdaSubmitting ? "not-allowed" : "pointer",
+                      }}
+                    >
+                      Cancelar
+                    </button>
+                    <button
+                      onClick={submitSubstTermoPerda}
+                      disabled={adminTermoPerdaSubmitting}
+                      style={{
+                        padding: "8px 12px",
+                        borderRadius: 8,
+                        border: "1px solid #111",
+                        background: "#111",
+                        color: "#fff",
+                        cursor: adminTermoPerdaSubmitting ? "not-allowed" : "pointer",
+                        fontWeight: 800,
+                      }}
+                    >
+                      {adminTermoPerdaSubmitting ? "Salvando..." : "Gerar termo"}
+                    </button>
+                  </div>
+                </div>
+              </div>
+            ) : null}
+
+            {adminPendenciaOpen ? (
+              <div
+                onClick={() => setAdminPendenciaOpen(false)}
+                style={{
+                  position: "fixed",
+                  inset: 0,
+                  background: "rgba(0,0,0,0.5)",
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  zIndex: 99999,
+                  padding: 16,
+                }}
+              >
+                <div
+                  onClick={(e) => e.stopPropagation()}
+                  style={{
+                    width: "min(720px, 96vw)",
+                    background: "#fff",
+                    color: "#111",
+                    borderRadius: 12,
+                    padding: 16,
+                    boxShadow: "0 20px 60px rgba(0,0,0,.35)",
+                  }}
+                >
+                  <div style={{ fontWeight: 900, fontSize: 16, marginBottom: 8 }}>
+                    Detalhe da pendência
+                  </div>
+                  {adminPendenciaSel ? (
+                    <>
+                      <div style={{ display: "grid", gap: 6, fontSize: 12, marginBottom: 10 }}>
+                        <div>
+                          <b>Kit:</b> {adminPendenciaSel.kit_nome || `Kit #${adminPendenciaSel.kit_id}`}
+                        </div>
+                        <div>
+                          <b>Item:</b> {adminPendenciaSel.descricao_canonica || `Item #${adminPendenciaSel.item_id}`}
+                        </div>
+                        <div>
+                          <b>Motivo:</b> {adminPendenciaSel.motivo || "—"}
+                        </div>
+                        {adminPendenciaSel.motivo === "FURTO" ? (
+                          <div>
+                            <b>BO:</b> {adminPendenciaSel.bo_ref || "—"}
+                          </div>
+                        ) : null}
+                        {adminPendenciaSel.motivo === "PERDA" ? (
+                          <>
+                            <div>
+                              <b>Termo:</b> {adminPendenciaSel.termo_id || "—"}
+                            </div>
+                            <div>
+                              <b>Responsável:</b>{" "}
+                              {adminPendenciaSel.responsavel_tipo && adminPendenciaSel.responsavel_id
+                                ? `${adminPendenciaSel.responsavel_tipo}:${adminPendenciaSel.responsavel_id}`
+                                : "—"}
+                            </div>
+                          </>
+                        ) : null}
+                        <div>
+                          <b>Histórico:</b>{" "}
+                          <button
+                            type="button"
+                            onClick={() =>
+                              openTrailKit({
+                                id: adminPendenciaSel.kit_id,
+                                nome: adminPendenciaSel.kit_nome,
+                              })
+                            }
+                            style={{
+                              padding: "4px 8px",
+                              borderRadius: 6,
+                              border: "1px solid #111",
+                              background: "#111",
+                              color: "#fff",
+                              cursor: "pointer",
+                              fontWeight: 700,
+                              marginLeft: 6,
+                            }}
+                          >
+                            Abrir trilha do kit
+                          </button>
+                        </div>
+                      </div>
+
+                      <div style={{ borderTop: "1px solid #eee", paddingTop: 10 }}>
+                        <label style={{ fontSize: 12, opacity: 0.8 }}>Ação</label>
+                        <select
+                          style={{ width: "100%", padding: 8, marginTop: 4 }}
+                          value={adminPendenciaAction}
+                          onChange={(e) => setAdminPendenciaAction(e.target.value)}
+                        >
+                          <option value="">Selecione</option>
+                          <option value="SUBSTITUIR_AVULSO">Substituir por avulso equivalente</option>
+                          <option value="REPOR_MESMO">Repor o mesmo item</option>
+                        </select>
+
+                        {adminPendenciaAction === "SUBSTITUIR_AVULSO" ? (
+                          <div style={{ marginTop: 8 }}>
+                            <label style={{ fontSize: 12, opacity: 0.8 }}>Item substituto</label>
+                            {adminPendenciaSubstitutos.length ? (
+                              <select
+                                style={{ width: "100%", padding: 8, marginTop: 4 }}
+                                value={adminPendenciaSubstitutoId}
+                                onChange={(e) => setAdminPendenciaSubstitutoId(e.target.value)}
+                              >
+                                <option value="">Selecione o substituto</option>
+                                {adminPendenciaSubstitutos.map((it) => (
+                                  <option key={it.id} value={it.id}>
+                                    {it.patrimonio} - {it.descricao}
+                                  </option>
+                                ))}
+                              </select>
+                            ) : (
+                              <input
+                                style={{ width: "100%", padding: 8, marginTop: 4 }}
+                                value={adminPendenciaSubstitutoId}
+                                onChange={(e) => setAdminPendenciaSubstitutoId(e.target.value)}
+                                placeholder={
+                                  adminPendenciaSubstitutosLoading
+                                    ? "Carregando substitutos..."
+                                    : "ID do item substituto"
+                                }
+                                disabled={adminPendenciaSubstitutosLoading}
+                              />
+                            )}
+                          </div>
+                        ) : null}
+
+                        {adminPendenciaMsg ? (
+                          <div style={{ marginTop: 8, fontSize: 12, color: "#b00020" }}>
+                            {adminPendenciaMsg}
+                          </div>
+                        ) : null}
+                      </div>
+                    </>
+                  ) : (
+                    <div style={{ fontSize: 12, color: "#b00020" }}>Pendência não encontrada.</div>
+                  )}
+
+                  <div style={{ display: "flex", justifyContent: "flex-end", gap: 10, marginTop: 12 }}>
+                    <button
+                      onClick={() => setAdminPendenciaOpen(false)}
+                      disabled={adminPendenciasLoading}
+                      style={{
+                        padding: "8px 12px",
+                        borderRadius: 8,
+                        border: "1px solid #aaa",
+                        cursor: adminPendenciasLoading ? "not-allowed" : "pointer",
+                      }}
+                    >
+                      Fechar
+                    </button>
+                    <button
+                      onClick={submitPendenciaKitResolution}
+                      disabled={adminPendenciasLoading}
+                      style={{
+                        padding: "8px 12px",
+                        borderRadius: 8,
+                        border: "1px solid #111",
+                        background: "#111",
+                        color: "#fff",
+                        cursor: adminPendenciasLoading ? "not-allowed" : "pointer",
+                        fontWeight: 800,
+                      }}
+                    >
+                      {adminPendenciasLoading ? "Processando..." : "Resolver pendência"}
                     </button>
                   </div>
                 </div>
@@ -5186,7 +6331,7 @@ export default function App() {
                 <label style={{ fontSize: 12, opacity: 0.85 }}>Texto do termo</label>
                 <textarea
                   readOnly
-                  value={buildManualTermoTexto(manualSel.nome)}
+                  value={buildManualTermoTexto(manualSel)}
                   style={{ width: "100%", minHeight: 140, padding: 10, marginTop: 4, fontSize: 12 }}
                 />
 
@@ -5359,6 +6504,7 @@ export default function App() {
               selectedKitId={selectedKitId}
               statusOverview={statusOverview}
               statusOverviewErr={statusOverviewErr}
+              pendingSubstituicoesAll={pendingSubstituicoesAll}
             />
           </div>
           <div
@@ -5619,7 +6765,7 @@ export default function App() {
                     onSolicitarDevolucao={() => solicitarDevolucaoKit(posseSelecionada.data.id)}
                     onDistribuir={markDistribuindoPosse}
                     pendingDevolucaoKits={pendingDevolucaoKits}
-                    pendingSubstituicoes={pendingSubstituicoes}
+                    pendingSubstituicoes={pendingSubstituicoesAll}
                   />
                 ) : (
                   <CardShell title="Detalhes do avulso">
@@ -5807,112 +6953,6 @@ export default function App() {
           </div>
         </div>
       </div>
-      {substModalItem && (
-        <div
-          onClick={() => {
-            if (!substSubmitting) {
-              setSubstModalItem(null);
-            }
-          }}
-          style={{
-            position: "fixed",
-            inset: 0,
-            background: "rgba(0,0,0,0.65)",
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            zIndex: 99999,
-            padding: 16,
-          }}
-        >
-          <div
-            onClick={(e) => e.stopPropagation()}
-            style={{
-              width: "min(520px, 96vw)",
-              background: "#111",
-              color: "#f2f2f2",
-              borderRadius: 14,
-              padding: 20,
-              boxShadow: "0 20px 60px rgba(0,0,0,.45)",
-            }}
-          >
-            <div style={{ fontSize: 16, fontWeight: 700, marginBottom: 12 }}>
-              Motivo da substituição
-            </div>
-            <div style={{ fontSize: 13, marginBottom: 16, opacity: 0.85 }}>
-              Escolha o motivo padrão para a solicitação, o admin vai validar o PIN depois.
-            </div>
-            <div style={{ display: "flex", gap: 10, marginBottom: 12 }}>
-              <button
-                onClick={() => submitSolicitacaoSubstituicao("MANUTENCAO")}
-                disabled={substSubmitting}
-                style={{
-                  flex: 1,
-                  padding: "10px 12px",
-                  borderRadius: 10,
-                  border: "1px solid #0b7a38",
-                  background: "#0b7a38",
-                  color: "#fff",
-                  fontWeight: 700,
-                  cursor: substSubmitting ? "not-allowed" : "pointer",
-                }}
-              >
-                Manutenção
-              </button>
-              <button
-                onClick={() => submitSolicitacaoSubstituicao("FURTO")}
-                disabled={substSubmitting}
-                style={{
-                  flex: 1,
-                  padding: "10px 12px",
-                  borderRadius: 10,
-                  border: "1px solid #b71c1c",
-                  background: "#b71c1c",
-                  color: "#fff",
-                  fontWeight: 700,
-                  cursor: substSubmitting ? "not-allowed" : "pointer",
-                }}
-              >
-                Furto
-              </button>
-            </div>
-            <label style={{ fontSize: 12, opacity: 0.8, marginBottom: 4 }}>Observação opcional</label>
-            <textarea
-              value={substObservacao}
-              onChange={(e) => setSubstObservacao(e.target.value)}
-              rows={3}
-              placeholder="Detalhes extras (opcional)..."
-              style={{
-                width: "100%",
-                padding: 10,
-                borderRadius: 10,
-                border: "1px solid rgba(255,255,255,0.15)",
-                background: "#0f0f0f",
-                color: "#fff",
-                resize: "vertical",
-                marginBottom: 12,
-              }}
-            />
-            <div style={{ display: "flex", justifyContent: "flex-end", gap: 10 }}>
-              <button
-                onClick={() => setSubstModalItem(null)}
-                disabled={substSubmitting}
-                style={{
-                  padding: "8px 12px",
-                  borderRadius: 10,
-                  border: "1px solid #aaa",
-                  background: "#222",
-                  color: "#fff",
-                  cursor: substSubmitting ? "not-allowed" : "pointer",
-                }}
-              >
-                Cancelar
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
     </div>
   )}
     </div>

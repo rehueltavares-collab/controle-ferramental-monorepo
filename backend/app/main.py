@@ -268,6 +268,14 @@ def ensure_kit_pendencias(db: Session) -> None:
               item_id INT NULL,
               descricao_canonica VARCHAR(255) NULL,
               motivo VARCHAR(50) NOT NULL,
+              bo_ref TEXT NULL,
+              termo_id INT NULL,
+              responsavel_tipo VARCHAR(20) NULL,
+              responsavel_id INT NULL,
+              resolucao_acao VARCHAR(30) NULL,
+              resolvido_por_item_id INT NULL,
+              resolvido_em DATETIME NULL,
+              resolvido_por_user_id INT NULL,
               observacao TEXT NULL,
               status VARCHAR(20) NOT NULL DEFAULT 'ABERTA',
               criado_em DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -276,6 +284,21 @@ def ensure_kit_pendencias(db: Session) -> None:
             """
         )
     )
+    columns = [
+        ("bo_ref", "TEXT NULL"),
+        ("termo_id", "INT NULL"),
+        ("responsavel_tipo", "VARCHAR(20) NULL"),
+        ("responsavel_id", "INT NULL"),
+        ("resolucao_acao", "VARCHAR(30) NULL"),
+        ("resolvido_por_item_id", "INT NULL"),
+        ("resolvido_em", "DATETIME NULL"),
+        ("resolvido_por_user_id", "INT NULL"),
+    ]
+    for column, col_type in columns:
+        try:
+            db.execute(text(f"ALTER TABLE kit_pendencias ADD COLUMN {column} {col_type}"))
+        except Exception:
+            pass
     db.commit()
 
 

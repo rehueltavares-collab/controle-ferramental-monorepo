@@ -46,10 +46,10 @@ def criar_termo(
     db: Session = Depends(get_db),
     payload: dict = Depends(get_current_token),
 ):
-    if body.tipo not in ("RETIRADA", "DEVOLUCAO", "SUBTERMO_DISTRIBUICAO"):
+    if body.tipo not in ("RETIRADA", "DEVOLUCAO", "SUBTERMO_DISTRIBUICAO", "PERDA"):
         raise HTTPException(
             status_code=400,
-            detail="tipo invalido (RETIRADA/DEVOLUCAO/SUBTERMO_DISTRIBUICAO)",
+            detail="tipo invalido (RETIRADA/DEVOLUCAO/SUBTERMO_DISTRIBUICAO/PERDA)",
         )
     if body.referencia_tipo not in ("KIT", "ITEM_ELETRICO", "ITEM_MANUAL", "KIT_MANUAL"):
         raise HTTPException(
@@ -63,7 +63,7 @@ def criar_termo(
         user = get_user_row(db, payload.get("sub"))
         sub_id = user["subresponsavel_id"] if user else None
 
-    if sub_id is None and enc_id is None:
+    if sub_id is None and enc_id is None and body.tipo != "PERDA":
         raise HTTPException(status_code=400, detail="Usuario sem subresponsavel_id ou encarregado_id")
 
     ip = request.client.host if request.client else None

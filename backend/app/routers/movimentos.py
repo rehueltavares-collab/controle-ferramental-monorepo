@@ -42,6 +42,10 @@ def ensure_movimentos_columns(db: Session) -> None:
             db.execute(text(f"ALTER TABLE {table} ADD COLUMN {column} {col_type}"))
         except Exception:
             pass
+    try:
+        db.execute(text("ALTER TABLE movimentos MODIFY COLUMN tipo VARCHAR(50) NOT NULL"))
+    except Exception:
+        pass
     db.commit()
 
 
@@ -61,6 +65,14 @@ def ensure_subresponsavel_pin_hash(db: Session) -> None:
             )
         except Exception:
             pass
+    db.commit()
+
+
+def ensure_termos_tipo_len(db: Session) -> None:
+    try:
+        db.execute(text("ALTER TABLE termos_responsabilidade MODIFY COLUMN tipo VARCHAR(50) NULL"))
+    except Exception:
+        pass
     db.commit()
 
 
@@ -142,10 +154,11 @@ def distribuir_item(
     payload: dict = Depends(get_current_token),
 ):
     ensure_movimentos_columns(db)
+    ensure_termos_tipo_len(db)
     validate_pin(body.pin)
 
     sub = get_subresponsavel(db, body.subresponsavel_id)
-    check_pin(body.pin, sub["pin"])
+    check_pin(body.pin, sub["pin_hash"])
 
     item_id = get_item_id(db, body.patrimonio)
     if not item_id:

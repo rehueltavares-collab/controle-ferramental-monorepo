@@ -46,14 +46,22 @@ class AdminPinOnlyIn(BaseModel):
 class AdminAprovarSubstituicaoIn(BaseModel):
     admin_pin: str
     substituto_item_id: int
+    motivo: Optional[str] = None
+    bo_ref: Optional[str] = None
+    termo_id: Optional[int] = None
+    responsavel_tipo: Optional[str] = None
+    responsavel_id: Optional[int] = None
+
+
+class AdminRecusarSubstituicaoIn(BaseModel):
+    admin_pin: str
+    motivo: Optional[str] = None
 
 
 class ConferenciaItemIn(BaseModel):
     solicitacao_item_id: int
     status: str
-    acao: Optional[str] = None
-    motivo: Optional[str] = None
-    observacao: Optional[str] = None
+    item_substituto_id: Optional[int] = None
 
 
 class ConferenciaEntregaIn(BaseModel):
@@ -65,7 +73,10 @@ class DevolucaoItemIn(BaseModel):
     item_id: int
     status: str
     motivo: Optional[str] = None
-    anexo_path: Optional[str] = None
+    bo_ref: Optional[str] = None
+    termo_id: Optional[int] = None
+    responsavel_tipo: Optional[str] = None
+    responsavel_id: Optional[int] = None
 
 
 class ConferenciaDevolucaoIn(BaseModel):
@@ -98,6 +109,11 @@ class AdminSubresponsavelCreateIn(BaseModel):
     nome: str
     secao: Optional[str] = None
     ativo: bool = True
+
+
+class ResolverPendenciaKitIn(BaseModel):
+    acao: str
+    item_substituto_id: Optional[int] = None
 
 
 def _map_operacao_tipo(tipo: str) -> str:
@@ -141,6 +157,14 @@ def _ensure_kit_pendencias(db: Session) -> None:
               item_id INT NULL,
               descricao_canonica VARCHAR(255) NULL,
               motivo VARCHAR(50) NOT NULL,
+              bo_ref TEXT NULL,
+              termo_id INT NULL,
+              responsavel_tipo VARCHAR(20) NULL,
+              responsavel_id INT NULL,
+              resolucao_acao VARCHAR(30) NULL,
+              resolvido_por_item_id INT NULL,
+              resolvido_em DATETIME NULL,
+              resolvido_por_user_id INT NULL,
               observacao TEXT NULL,
               status VARCHAR(20) NOT NULL DEFAULT 'ABERTA',
               criado_em DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -149,6 +173,21 @@ def _ensure_kit_pendencias(db: Session) -> None:
             """
         )
     )
+    columns = [
+        ("bo_ref", "TEXT NULL"),
+        ("termo_id", "INT NULL"),
+        ("responsavel_tipo", "VARCHAR(20) NULL"),
+        ("responsavel_id", "INT NULL"),
+        ("resolucao_acao", "VARCHAR(30) NULL"),
+        ("resolvido_por_item_id", "INT NULL"),
+        ("resolvido_em", "DATETIME NULL"),
+        ("resolvido_por_user_id", "INT NULL"),
+    ]
+    for column, col_type in columns:
+        try:
+            db.execute(text(f"ALTER TABLE kit_pendencias ADD COLUMN {column} {col_type}"))
+        except Exception:
+            pass
     db.commit()
 
 
@@ -838,17 +877,11 @@ def conferir_entrega_admin(
     itens_map = {int(r["solicitacao_item_id"]): r for r in itens_rows}
     payload_itens = {int(i.solicitacao_item_id): i for i in (body.itens or [])}
 
-    pendencias = []
-
     for sol_item_id, row in itens_map.items():
         item_payload = payload_itens.get(sol_item_id)
         status = (item_payload.status if item_payload else "PRESENTE").upper()
-        acao = (item_payload.acao or "").upper() if item_payload else ""
-        motivo = (item_payload.motivo or "").strip() if item_payload else None
-        obs = (item_payload.observacao or "").strip() if item_payload else None
-
-        if status not in ("PRESENTE", "AUSENTE", "DEFEITO"):
-            raise HTTPException(status_code=400, detail="Status invalido")
+        if status not in ("PRESENTE", "AUSENTE"):
+            raise HTTPException(status_code=400, detail="Status invalido (PRESENTE/AUSENTE)")
 
         if status == "PRESENTE":
             db.execute(
@@ -866,13 +899,73 @@ def conferir_entrega_admin(
             )
             continue
 
-        # AUSENTE/DEFEITO
+        # AUSENTE (substituicao obrigatoria)
+        sub_id = int(item_payload.item_substituto_id) if item_payload else 0
+        if not sub_id:
+            raise HTTPException(status_code=400, detail="item_substituto_id obrigatorio")
+
+        original = db.execute(
+            text("SELECT id, patrimonio, descricao, descricao_canonica, classe_tipo FROM itens WHERE id = :id"),
+            {"id": int(row["item_id"])},
+        ).mappings().first()
+        substituto = db.execute(
+            text(
+                """
+                SELECT i.id, i.patrimonio, i.descricao, i.descricao_canonica, i.classe_tipo,
+                       i.ativo, i.disponivel, ki.item_id AS kit_item_id
+                FROM itens i
+                LEFT JOIN kit_itens ki ON ki.item_id = i.id
+                WHERE i.id = :id
+                """
+            ),
+            {"id": sub_id},
+        ).mappings().first()
+        if not original or not substituto:
+            raise HTTPException(status_code=404, detail="Item original/substituto nao encontrado")
+        orig_desc = (original.get("descricao_canonica") or "").strip() or normalize_desc(
+            original.get("descricao") or ""
+        )
+        sub_desc = (substituto.get("descricao_canonica") or "").strip() or normalize_desc(
+            substituto.get("descricao") or ""
+        )
+        if orig_desc and sub_desc and orig_desc != sub_desc:
+            raise HTTPException(status_code=400, detail="Substituto deve ter a mesma descricao_canonica")
+        if int(substituto.get("ativo") or 0) != 1:
+            raise HTTPException(status_code=409, detail="SUBSTITUTO_NOT_AVAILABLE")
+        if int(substituto.get("disponivel") or 0) != 1:
+            raise HTTPException(status_code=409, detail="SUBSTITUTO_NOT_AVAILABLE")
+        if substituto.get("kit_item_id"):
+            raise HTTPException(status_code=409, detail="SUBSTITUTO_NOT_AVAILABLE")
+
+        db.execute(
+            text("DELETE FROM kit_itens WHERE kit_id = :kit_id AND item_id = :item_id"),
+            {"kit_id": int(sol.get("kit_id") or 0), "item_id": int(original["id"])},
+        )
+        existing = db.execute(
+            text("SELECT id FROM kit_itens WHERE kit_id = :kit_id AND item_id = :item_id LIMIT 1"),
+            {"kit_id": int(sol.get("kit_id") or 0), "item_id": int(substituto["id"])},
+        ).first()
+        if not existing:
+            db.execute(
+                text("INSERT INTO kit_itens (kit_id, item_id, quantidade) VALUES (:kit_id, :item_id, 1)"),
+                {"kit_id": int(sol.get("kit_id") or 0), "item_id": int(substituto["id"])},
+            )
+
+        db.execute(
+            text("UPDATE itens SET disponivel = 0 WHERE id = :id"),
+            {"id": int(substituto["id"])},
+        )
+        db.execute(
+            text("UPDATE itens SET disponivel = 1 WHERE id = :id"),
+            {"id": int(original["id"])},
+        )
+
         db.execute(
             text(
                 """
                 UPDATE solicitacao_itens
-                SET status = 'AUSENTE',
-                    quantidade_entregue = 0,
+                SET status = 'ENTREGUE',
+                    quantidade_entregue = quantidade_solicitada,
                     admin_user_id = :uid,
                     atualizado_em = NOW()
                 WHERE id = :sid
@@ -881,60 +974,47 @@ def conferir_entrega_admin(
             {"uid": int(payload["uid"]), "sid": sol_item_id},
         )
 
-        if acao == "SUBSTITUICAO":
-            pendente_key = f"SUBSTITUICAO_ITEM:{int(sol.get('kit_id') or 0)}:{int(row['item_id'])}"
-            existing = db.execute(
-                text(
-                    """
-                    SELECT id
-                    FROM solicitacoes_operacao
-                    WHERE pendente_key = :key
-                      AND status = 'PENDENTE'
-                    LIMIT 1
-                    """
-                ),
-                {"key": pendente_key},
-            ).first()
-            if not existing:
-                db.execute(
-                    text(
-                        """
-                        INSERT INTO solicitacoes_operacao
-                          (tipo, kit_id, item_id, pendente_key, solicitante_user_id, encarregado_id, subresponsavel_id, status, observacao)
-                        VALUES
-                          ('SUBSTITUICAO_ITEM', :kit_id, :item_id, :pendente_key, :uid, :enc_id, :sub_id, 'PENDENTE', :obs)
-                        """
-                    ),
-                    {
-                        "kit_id": int(sol.get("kit_id") or 0),
-                        "item_id": int(row["item_id"]),
-                        "pendente_key": pendente_key,
-                        "uid": int(sol.get("solicitante_user_id") or 0),
-                        "enc_id": sol.get("encarregado_id"),
-                        "sub_id": sub_id,
-                        "obs": obs or "GERADO_POR_CONFERENCIA",
-                    },
-                )
-        else:
-            canon = row.get("descricao_canonica") or normalize_desc(row.get("descricao"))
-            db.execute(
-                text(
-                    """
-                    INSERT INTO kit_pendencias
-                      (kit_id, item_id, descricao_canonica, motivo, observacao, status)
-                    VALUES
-                      (:kit_id, :item_id, :canon, :motivo, :obs, 'ABERTA')
-                    """
-                ),
-                {
-                    "kit_id": int(sol.get("kit_id") or 0),
-                    "item_id": int(row["item_id"]),
-                    "canon": canon,
-                    "motivo": (motivo or "AUSENTE").upper(),
-                    "obs": obs,
-                },
-            )
-            pendencias.append(f"{row.get('descricao') or row.get('patrimonio')}")
+        obs_base = f"Substituicao entrega: {original['patrimonio']} -> {substituto['patrimonio']}"
+        db.execute(
+            text(
+                """
+                INSERT INTO movimentos
+                  (tipo, kit_id, patrimonio, encarregado_id, subresponsavel_id, quantidade, observacao,
+                   registrado_por_id, pin_tipo, pin_autor_id, termo_id)
+                VALUES
+                  ('SUBSTITUIR', :kit_id, :pat, :enc_id, NULL, 1, :obs,
+                   :reg_id, 'ADMIN_4', :pin_autor, NULL)
+                """
+            ),
+            {
+                "kit_id": int(sol.get("kit_id") or 0),
+                "pat": original["patrimonio"],
+                "enc_id": sol.get("encarregado_id"),
+                "obs": obs_base,
+                "reg_id": int(payload["uid"]),
+                "pin_autor": int(payload["uid"]),
+            },
+        )
+        db.execute(
+            text(
+                """
+                INSERT INTO movimentos
+                  (tipo, kit_id, patrimonio, encarregado_id, subresponsavel_id, quantidade, observacao,
+                   registrado_por_id, pin_tipo, pin_autor_id, termo_id)
+                VALUES
+                  ('SUBSTITUIR_ENTRA', :kit_id, :pat, :enc_id, NULL, 1, :obs,
+                   :reg_id, 'ADMIN_4', :pin_autor, NULL)
+                """
+            ),
+            {
+                "kit_id": int(sol.get("kit_id") or 0),
+                "pat": substituto["patrimonio"],
+                "enc_id": sol.get("encarregado_id"),
+                "obs": f"Entrada por substituicao na entrega do {original['patrimonio']}",
+                "reg_id": int(payload["uid"]),
+                "pin_autor": int(payload["uid"]),
+            },
+        )
 
     db.execute(
         text(
@@ -969,23 +1049,6 @@ def conferir_entrega_admin(
             {"kit_id": int(sol.get("kit_id")), "enc_id": int(sol.get("encarregado_id"))},
         )
 
-    if pendencias and sol.get("termo_id"):
-        termo_row = db.execute(
-            text("SELECT texto_termo FROM termos_responsabilidade WHERE id = :tid"),
-            {"tid": int(sol.get("termo_id"))},
-        ).mappings().first()
-        if termo_row:
-            bloco = "\n\nKIT ENTREGUE COM PENDENCIA:\n" + "\n".join(
-                f"- {p}" for p in pendencias
-            )
-            novo_texto = (termo_row.get("texto_termo") or "") + bloco
-            db.execute(
-                text(
-                    "UPDATE termos_responsabilidade SET texto_termo = :txt WHERE id = :tid"
-                ),
-                {"txt": novo_texto, "tid": int(sol.get("termo_id"))},
-            )
-
     db.commit()
     return {"ok": True}
 
@@ -997,8 +1060,55 @@ def aprovar_substituicao_admin(
     db: Session = Depends(get_db),
     payload: dict = Depends(get_current_token),
 ):
-    req = ConcluirOperacaoIn(admin_pin=body.admin_pin, item_substituto_id=body.substituto_item_id)
+    req = ConcluirOperacaoIn(
+        admin_pin=body.admin_pin,
+        item_substituto_id=body.substituto_item_id,
+        motivo=body.motivo,
+        bo_ref=body.bo_ref,
+        termo_id=body.termo_id,
+        responsavel_tipo=body.responsavel_tipo,
+        responsavel_id=body.responsavel_id,
+    )
     return concluir_operacao(operacao_id, req, db=db, payload=payload)
+
+
+@router.post("/solicitacoes/operacao/{operacao_id}/recusar-substituicao", dependencies=[Depends(require_roles(["admin"]))])
+def recusar_substituicao_admin(
+    operacao_id: int,
+    body: AdminRecusarSubstituicaoIn,
+    db: Session = Depends(get_db),
+    payload: dict = Depends(get_current_token),
+):
+    ensure_operacoes_table(db)
+    require_admin_pin(db, payload, body.admin_pin)
+    op = db.execute(
+        text("SELECT * FROM solicitacoes_operacao WHERE id = :oid"),
+        {"oid": operacao_id},
+    ).mappings().first()
+    if not op:
+        raise HTTPException(status_code=404, detail="Operacao nao encontrada")
+    if (op.get("tipo") or "").upper() != "SUBSTITUICAO_ITEM":
+        raise HTTPException(status_code=400, detail="Operacao nao eh substituicao")
+    if op.get("status") == "CONCLUIDA":
+        return {"ok": True, "status": "CONCLUIDA"}
+
+    motivo = (body.motivo or "SEM_AVULSO_EQUIVALENTE").strip()[:120]
+    db.execute(
+        text(
+            """
+            UPDATE solicitacoes_operacao
+            SET status = 'CONCLUIDA',
+                admin_user_id = :uid,
+                concluido_em = NOW(),
+                pendente_key = NULL,
+                observacao = :obs
+            WHERE id = :oid
+            """
+        ),
+        {"uid": int(payload["uid"]), "oid": operacao_id, "obs": f"RECUSADA: {motivo}"},
+    )
+    db.commit()
+    return {"ok": True}
 
 
 @router.post("/solicitacoes/operacao/{operacao_id}/confirmar-devolucao", dependencies=[Depends(require_roles(["admin"]))])
@@ -1022,6 +1132,7 @@ def conferir_devolucao_admin(
     ensure_operacoes_table(db)
     ensure_itens_columns(db)
     _ensure_kit_pendencias(db)
+    ensure_movimentos_columns(db)
     require_admin_pin(db, payload, body.admin_pin)
 
     op = db.execute(
@@ -1036,10 +1147,31 @@ def conferir_devolucao_admin(
     itens = body.itens or []
     for it in itens:
         status = (it.status or "").upper()
+        if status not in ("PRESENTE", "AUSENTE"):
+            raise HTTPException(status_code=400, detail="Status invalido (PRESENTE/AUSENTE)")
         if status == "PRESENTE":
             continue
-        motivo = (it.motivo or "PERDA").upper()
-        obs = (it.anexo_path or "").strip() or None
+
+        motivo = (it.motivo or "").upper().strip()
+        if motivo not in ("FURTO", "PERDA"):
+            raise HTTPException(status_code=400, detail="Motivo invalido (FURTO/PERDA)")
+
+        bo_ref = (it.bo_ref or "").strip()
+        termo_id = int(it.termo_id) if it.termo_id else None
+        responsavel_tipo = (it.responsavel_tipo or "").strip().upper()
+        responsavel_id = int(it.responsavel_id) if it.responsavel_id else None
+
+        if motivo == "FURTO" and not bo_ref:
+            raise HTTPException(status_code=400, detail="bo_ref obrigatorio para FURTO")
+        if motivo == "PERDA":
+            if responsavel_tipo not in ("USER", "SUBRESP"):
+                raise HTTPException(status_code=400, detail="responsavel_tipo invalido (USER/SUBRESP)")
+            if not responsavel_id or not termo_id:
+                raise HTTPException(
+                    status_code=400,
+                    detail="responsavel_id e termo_id obrigatorios para PERDA",
+                )
+
         canon_row = db.execute(
             text("SELECT descricao_canonica, descricao FROM itens WHERE id = :id"),
             {"id": int(it.item_id)},
@@ -1047,23 +1179,101 @@ def conferir_devolucao_admin(
         canon = (canon_row.get("descricao_canonica") if canon_row else None) or normalize_desc(
             canon_row.get("descricao") if canon_row else ""
         )
-        db.execute(
-            text(
-                """
-                INSERT INTO kit_pendencias
-                  (kit_id, item_id, descricao_canonica, motivo, observacao, status)
-                VALUES
-                  (:kit_id, :item_id, :canon, :motivo, :obs, 'ABERTA')
-                """
-            ),
-            {
-                "kit_id": int(op.get("kit_id") or 0),
-                "item_id": int(it.item_id),
-                "canon": canon,
-                "motivo": motivo,
-                "obs": obs,
-            },
-        )
+        obs_parts = [f"motivo={motivo}"]
+        if motivo == "FURTO":
+            obs_parts.append(f"bo_ref={bo_ref}")
+        else:
+            obs_parts.append(f"termo_id={termo_id}")
+            obs_parts.append(f"responsavel={responsavel_tipo}:{responsavel_id}")
+        obs = " | ".join(obs_parts)
+
+        if op.get("kit_id"):
+            existing = db.execute(
+                text(
+                    """
+                    SELECT id
+                    FROM kit_pendencias
+                    WHERE kit_id = :kit_id AND item_id = :item_id AND status = 'ABERTA'
+                    LIMIT 1
+                    """
+                ),
+                {"kit_id": int(op.get("kit_id")), "item_id": int(it.item_id)},
+            ).mappings().first()
+            if existing:
+                db.execute(
+                    text(
+                        """
+                        UPDATE kit_pendencias
+                        SET motivo = :motivo,
+                            bo_ref = :bo_ref,
+                            termo_id = :termo_id,
+                            responsavel_tipo = :resp_tipo,
+                            responsavel_id = :resp_id,
+                            observacao = :obs
+                        WHERE id = :pid
+                        """
+                    ),
+                    {
+                        "pid": int(existing["id"]),
+                        "motivo": motivo,
+                        "bo_ref": bo_ref or None,
+                        "termo_id": termo_id,
+                        "resp_tipo": responsavel_tipo or None,
+                        "resp_id": responsavel_id,
+                        "obs": obs,
+                    },
+                )
+            else:
+                db.execute(
+                    text(
+                        """
+                        INSERT INTO kit_pendencias
+                          (kit_id, item_id, descricao_canonica, motivo, bo_ref, termo_id,
+                           responsavel_tipo, responsavel_id, observacao, status)
+                        VALUES
+                          (:kit_id, :item_id, :canon, :motivo, :bo_ref, :termo_id,
+                           :resp_tipo, :resp_id, :obs, 'ABERTA')
+                        """
+                    ),
+                    {
+                        "kit_id": int(op.get("kit_id")),
+                        "item_id": int(it.item_id),
+                        "canon": canon,
+                        "motivo": motivo,
+                        "bo_ref": bo_ref or None,
+                        "termo_id": termo_id,
+                        "resp_tipo": responsavel_tipo or None,
+                        "resp_id": responsavel_id,
+                        "obs": obs,
+                    },
+                )
+
+        item_row = db.execute(
+            text("SELECT patrimonio FROM itens WHERE id = :id"),
+            {"id": int(it.item_id)},
+        ).mappings().first()
+        if item_row:
+            db.execute(
+                text(
+                    """
+                    INSERT INTO movimentos
+                      (tipo, kit_id, patrimonio, encarregado_id, subresponsavel_id, quantidade, observacao,
+                       registrado_por_id, pin_tipo, pin_autor_id, termo_id)
+                    VALUES
+                      ('DEVOLUCAO_AUSENTE', :kit_id, :pat, :enc_id, NULL, 1, :obs,
+                       :reg_id, 'ADMIN_4', :pin_autor, :termo_id)
+                    """
+                ),
+                {
+                    "kit_id": op.get("kit_id"),
+                    "pat": item_row.get("patrimonio"),
+                    "enc_id": op.get("encarregado_id") or op.get("solicitante_user_id"),
+                    "obs": obs,
+                    "reg_id": int(payload["uid"]),
+                    "pin_autor": int(payload["uid"]),
+                    "termo_id": termo_id,
+                },
+            )
 
     db.execute(
         text(
@@ -1192,11 +1402,14 @@ def listar_avulsos_disponiveis(
 @router.get("/substituicao/candidatos", dependencies=[Depends(require_roles(["admin"]))])
 def listar_candidatos_substituicao(
     descricao_canonica: str = Query(default=""),
+    descricao: Optional[str] = Query(default=""),
     kit_id: Optional[int] = Query(default=None),
     db: Session = Depends(get_db),
 ):
     ensure_itens_columns(db)
     canon = (descricao_canonica or "").strip()
+    if not canon and descricao:
+        canon = normalize_desc(descricao)
     if not canon:
         return {"avulsos": [], "kits": []}
 
@@ -1216,6 +1429,24 @@ def listar_candidatos_substituicao(
         ),
         {"canon": canon},
     ).mappings().all()
+    if not avulsos and descricao:
+        q_like = f"%{descricao.strip()}%"
+        avulsos = db.execute(
+            text(
+                """
+                SELECT i.id, i.patrimonio, i.descricao, i.descricao_canonica, i.classe_tipo
+                FROM itens i
+                LEFT JOIN kit_itens ki ON ki.item_id = i.id
+                WHERE ki.item_id IS NULL
+                  AND i.ativo = 1
+                  AND i.disponivel = 1
+                  AND (i.descricao LIKE :q_like OR i.patrimonio LIKE :q_like)
+                ORDER BY i.patrimonio
+                LIMIT 200
+                """
+            ),
+            {"q_like": q_like},
+        ).mappings().all()
 
     kits = db.execute(
         text(
@@ -1258,21 +1489,210 @@ def listar_kits_pendencias(db: Session = Depends(get_db)):
 
 
 @router.post("/kits/pendencias/{pendencia_id}/resolver", dependencies=[Depends(require_roles(["admin"]))])
-def resolver_kit_pendencia(pendencia_id: int, db: Session = Depends(get_db)):
+def resolver_kit_pendencia(
+    pendencia_id: int,
+    body: ResolverPendenciaKitIn,
+    db: Session = Depends(get_db),
+    payload: dict = Depends(get_current_token),
+):
     _ensure_kit_pendencias(db)
-    res = db.execute(
+    ensure_itens_columns(db)
+    ensure_movimentos_columns(db)
+
+    acao = (body.acao or "").strip().upper()
+    if acao not in ("SUBSTITUIR_AVULSO", "REPOR_MESMO"):
+        raise HTTPException(status_code=400, detail="acao invalida")
+
+    pend = db.execute(
         text(
             """
-            UPDATE kit_pendencias
-            SET status = 'RESOLVIDA', encerrado_em = NOW()
-            WHERE id = :pid
+            SELECT *
+            FROM kit_pendencias
+            WHERE id = :pid AND status = 'ABERTA'
+            LIMIT 1
             """
         ),
         {"pid": pendencia_id},
-    )
-    db.commit()
-    if res.rowcount == 0:
+    ).mappings().first()
+    if not pend:
         raise HTTPException(status_code=404, detail="Pendencia nao encontrada")
+
+    kit_id = int(pend.get("kit_id") or 0)
+    item_id = int(pend.get("item_id") or 0)
+
+    if acao == "SUBSTITUIR_AVULSO":
+        sub_id = int(body.item_substituto_id or 0)
+        if not sub_id:
+            raise HTTPException(status_code=400, detail="item_substituto_id obrigatorio")
+        if not kit_id or not item_id:
+            raise HTTPException(status_code=400, detail="Pendencia sem kit/item para substituir")
+
+        original = db.execute(
+            text("SELECT id, patrimonio, descricao, descricao_canonica, classe_tipo FROM itens WHERE id = :id"),
+            {"id": item_id},
+        ).mappings().first()
+        substituto = db.execute(
+            text(
+                """
+                SELECT i.id, i.patrimonio, i.descricao, i.descricao_canonica, i.classe_tipo,
+                       i.ativo, i.disponivel, ki.item_id AS kit_item_id
+                FROM itens i
+                LEFT JOIN kit_itens ki ON ki.item_id = i.id
+                WHERE i.id = :id
+                """
+            ),
+            {"id": sub_id},
+        ).mappings().first()
+
+        if not original or not substituto:
+            raise HTTPException(status_code=404, detail="Item original/substituto nao encontrado")
+        if int(substituto.get("ativo") or 0) != 1 or int(substituto.get("disponivel") or 0) != 1:
+            raise HTTPException(status_code=409, detail="SUBSTITUTO_NOT_AVAILABLE")
+        if substituto.get("kit_item_id"):
+            raise HTTPException(status_code=409, detail="SUBSTITUTO_NOT_AVAILABLE")
+
+        pend_canon = (pend.get("descricao_canonica") or "").strip()
+        sub_canon = (substituto.get("descricao_canonica") or "").strip()
+        if pend_canon and sub_canon and pend_canon != sub_canon:
+            raise HTTPException(status_code=400, detail="Substituto deve ser equivalente")
+
+        db.execute(
+            text("DELETE FROM kit_itens WHERE kit_id = :kit_id AND item_id = :item_id"),
+            {"kit_id": kit_id, "item_id": item_id},
+        )
+        existing = db.execute(
+            text("SELECT id FROM kit_itens WHERE kit_id = :kit_id AND item_id = :item_id LIMIT 1"),
+            {"kit_id": kit_id, "item_id": sub_id},
+        ).first()
+        if not existing:
+            db.execute(
+                text(
+                    "INSERT INTO kit_itens (kit_id, item_id, quantidade) VALUES (:kit_id, :item_id, 1)"
+                ),
+                {"kit_id": kit_id, "item_id": sub_id},
+            )
+        db.execute(
+            text("UPDATE itens SET disponivel = 0 WHERE id = :id"),
+            {"id": sub_id},
+        )
+
+        obs_base = f"Pendencia #{pendencia_id}: {original['patrimonio']} -> {substituto['patrimonio']}"
+        db.execute(
+            text(
+                """
+                INSERT INTO movimentos
+                  (tipo, kit_id, patrimonio, encarregado_id, subresponsavel_id, quantidade, observacao,
+                   registrado_por_id, pin_tipo, pin_autor_id, termo_id)
+                VALUES
+                  ('SUBSTITUICAO_PENDENCIA', :kit_id, :pat, :enc_id, NULL, 1, :obs,
+                   :reg_id, 'ADMIN_4', :pin_autor, NULL)
+                """
+            ),
+            {
+                "kit_id": kit_id,
+                "pat": original["patrimonio"],
+                "enc_id": None,
+                "obs": obs_base,
+                "reg_id": int(payload["uid"]),
+                "pin_autor": int(payload["uid"]),
+            },
+        )
+        db.execute(
+            text(
+                """
+                INSERT INTO movimentos
+                  (tipo, kit_id, patrimonio, encarregado_id, subresponsavel_id, quantidade, observacao,
+                   registrado_por_id, pin_tipo, pin_autor_id, termo_id)
+                VALUES
+                  ('SUBSTITUICAO_PENDENCIA_ENTRA', :kit_id, :pat, :enc_id, NULL, 1, :obs,
+                   :reg_id, 'ADMIN_4', :pin_autor, NULL)
+                """
+            ),
+            {
+                "kit_id": kit_id,
+                "pat": substituto["patrimonio"],
+                "enc_id": None,
+                "obs": f"Entrada por substituicao de pendencia #{pendencia_id}",
+                "reg_id": int(payload["uid"]),
+                "pin_autor": int(payload["uid"]),
+            },
+        )
+
+        resolucao_acao = "SUBSTITUIR_AVULSO"
+        resolvido_por_item_id = sub_id
+    else:
+        if not kit_id or not item_id:
+            raise HTTPException(status_code=400, detail="Pendencia sem kit/item para reposicao")
+
+        item_row = db.execute(
+            text("SELECT patrimonio FROM itens WHERE id = :id"),
+            {"id": item_id},
+        ).mappings().first()
+        if item_row:
+            db.execute(
+                text(
+                    """
+                    INSERT INTO movimentos
+                      (tipo, kit_id, patrimonio, encarregado_id, subresponsavel_id, quantidade, observacao,
+                       registrado_por_id, pin_tipo, pin_autor_id, termo_id)
+                    VALUES
+                      ('REPOSICAO_PENDENCIA', :kit_id, :pat, :enc_id, NULL, 1, :obs,
+                       :reg_id, 'ADMIN_4', :pin_autor, NULL)
+                    """
+                ),
+                {
+                    "kit_id": kit_id,
+                    "pat": item_row.get("patrimonio"),
+                    "enc_id": None,
+                    "obs": f"Reposicao pendencia #{pendencia_id}",
+                    "reg_id": int(payload["uid"]),
+                    "pin_autor": int(payload["uid"]),
+                },
+            )
+
+        resolucao_acao = "REPOR_MESMO"
+        resolvido_por_item_id = None
+
+    db.execute(
+        text(
+            """
+            UPDATE kit_pendencias
+            SET status = 'RESOLVIDA',
+                resolucao_acao = :acao,
+                resolvido_por_item_id = :item_id,
+                resolvido_em = NOW(),
+                resolvido_por_user_id = :uid,
+                encerrado_em = NOW()
+            WHERE id = :pid
+            """
+        ),
+        {
+            "acao": resolucao_acao,
+            "item_id": resolvido_por_item_id,
+            "uid": int(payload["uid"]),
+            "pid": pendencia_id,
+        },
+    )
+
+    if kit_id:
+        pend_count = db.execute(
+            text(
+                """
+                SELECT COUNT(*) AS c
+                FROM kit_pendencias
+                WHERE kit_id = :kit_id AND status = 'ABERTA'
+                """
+            ),
+            {"kit_id": kit_id},
+        ).scalar() or 0
+        has_disponivel = db.execute(text("SHOW COLUMNS FROM kits LIKE 'disponivel'")).first()
+        if has_disponivel:
+            db.execute(
+                text("UPDATE kits SET disponivel = :d WHERE id = :kit_id"),
+                {"d": 0 if pend_count else 1, "kit_id": kit_id},
+            )
+
+    db.commit()
     return {"ok": True}
 
 
